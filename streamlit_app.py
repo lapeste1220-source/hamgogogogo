@@ -44,7 +44,8 @@ def _safe_read_csv(relative_name: str) -> pd.DataFrame | None:
 
     for enc in ("utf-8-sig", "cp949", "euc-kr"):
         try:
-            return pd.read_csv(path, encoding=enc)
+            df = pd.read_csv(path, encoding=enc)
+            return df
         except Exception:
             continue
 
@@ -93,8 +94,12 @@ suji_raw, su_raw, jeong_raw, choejeo_raw = load_all_data()
 def preprocess_suji(df: pd.DataFrame | None) -> pd.DataFrame | None:
     if df is None:
         return None
-
     df = df.copy()
+
+    # 문자열 정리
+    for c in ["대학명", "모집단위", "모집단위명", "지역"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
 
     # 대표 등급 컬럼 만들기
     candidate_cols = ["전교과", "일반등급", "내등급(환산)"]
@@ -121,7 +126,7 @@ def preprocess_suji(df: pd.DataFrame | None) -> pd.DataFrame | None:
 
     # 전형 대분류 (교과/종합/농어촌 등)
     src_col = None
-    for c in ["전형유형", "전형명(대)", "전형유형", "세부유형", "전형명"]:
+    for c in ["전형유형", "전형명(대)", "세부유형", "전형명"]:
         if c in df.columns:
             src_col = c
             break
@@ -137,7 +142,14 @@ def preprocess_su(df: pd.DataFrame | None) -> pd.DataFrame | None:
     if df is None:
         return None
     df = df.copy()
+
+    # 문자열 정리
+    for c in ["대학명", "모집단위명", "지역구분"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
+
     df = to_numeric(df, ["모집인원", "선발비율", "전형총점"])
+
     # 수시 전형 대분류
     src = "전형세부유형" if "전형세부유형" in df.columns else None
     if src:
@@ -151,6 +163,12 @@ def preprocess_jeong(df: pd.DataFrame | None) -> pd.DataFrame | None:
     if df is None:
         return None
     df = df.copy()
+
+    # 문자열 정리
+    for c in ["대학명", "모집단위"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
+
     num_cols = [c for c in df.columns if "평균백분위" in c or "평균등급" in c]
     df = to_numeric(df, num_cols)
     return df
@@ -160,6 +178,9 @@ def preprocess_choejeo(df: pd.DataFrame | None) -> pd.DataFrame | None:
     if df is None:
         return None
     df = df.copy()
+    for c in ["대학명", "모집단위명", "지역구분"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
     return df
 
 
@@ -169,34 +190,96 @@ jeong = preprocess_jeong(jeong_raw)
 choejeo = preprocess_choejeo(choejeo_raw)
 
 # --------------------------------------------------
-# 1-1. 보조 집계 테이블 (정시 평균 백분위, 수시 평균 내신)
+# 1-1. 보조 집계 테이블
+#   - 정시: 대학+학과 일반전형 평균 백분위
+#   - 수시: 대학+학과 교과전형(가장 많이 뽑는 전형)의 평균 내신
+#   - 함창고: 대학/학과별 합격 내신 통계(평균/50/70/80)
 # --------------------------------------------------
 JEONG_SCORE_COL = None
-JEONG_UNIV_SCORE = None
+JEONG_DEPT_GENERAL = None
 if jeong is not None and not jeong.empty:
+    # 반영영역 평균백분위 컬럼 찾기
     for c in jeong.columns:
         if "평균백분위" in c:
             JEONG_SCORE_COL = c
             break
     if JEONG_SCORE_COL:
-        temp = jeong.copy()
-        temp = to_numeric(temp, [JEONG_SCORE_COL])
-        JEONG_UNIV_SCORE = (
-            temp.groupby("대학명")[JEONG_SCORE_COL]
+        jg = jeong.copy()
+        jg = to_numeric(jg, [JEONG_SCORE_COL])
+        jg = jg.dropna(subset=[JEONG_SCORE_COL])
+
+        # 일반전형만
+        if "전형명" in jg.columns:
+            jg = jg[jg["전형명"].astype(str).str.contains("일반", na=False)]
+
+        group_cols = ["대학명"]
+        if "모집단위" in jg.columns:
+            group_cols.append("모집단위")
+
+        JEONG_DEPT_GENERAL = (
+            jg.groupby(group_cols)[JEONG_SCORE_COL]
             .mean()
             .reset_index()
             .rename(columns={JEONG_SCORE_COL: "정시평균백분위"})
         )
 
-HAM_SUSI_AVG = None
+# 수시 입결(어디가)에서 대학+학과별 "교과전형" 평균 내신(가장 많이 뽑는 전형 기준)
+SUSI_GRADE_COL = None
+SU_DEPT_AVG = None
+if su is not None and not su.empty:
+    for c in su.columns:
+        if ("평균" in c and "등급" in c) or ("평균" in c and "내신" in c):
+            SUSI_GRADE_COL = c
+            break
+    if SUSI_GRADE_COL:
+        sg = su.copy()
+        sg = to_numeric(sg, [SUSI_GRADE_COL, "모집인원"] if "모집인원" in sg.columns else [SUSI_GRADE_COL])
+
+        # 교과 전형만
+        if "전형대분류" in sg.columns:
+            sg = sg[sg["전형대분류"] == "교과"]
+
+        # 모집인원 많은 전형 우선
+        if "모집인원" in sg.columns:
+            sg = sg.sort_values("모집인원", ascending=False)
+
+        # 대학+모집단위명 기준으로 대표 한 줄만 남기기
+        keep_cols = ["대학명", "모집단위명", SUSI_GRADE_COL]
+        sg = sg.dropna(subset=[SUSI_GRADE_COL])
+        sg = sg[keep_cols].drop_duplicates(subset=["대학명", "모집단위명"])
+        SU_DEPT_AVG = sg.rename(columns={SUSI_GRADE_COL: "수시평균내신"})
+
+# 함창고 합격 내신 통계 (대학/학과별)
+HAM_ACCEPT_STATS = None
 if suji is not None and not suji.empty:
-    tmp = suji[suji["대표등급"].notna()].copy()
-    HAM_SUSI_AVG = (
-        tmp.groupby("대학명")["대표등급"]
-        .mean()
-        .reset_index()
-        .rename(columns={"대표등급": "수시평균내신"})
-    )
+    h = suji.copy()
+    h = h[(h["합격여부"] == "합격") & h["대표등급"].notna()]
+    if not h.empty:
+        if "모집단위" in h.columns:
+            dept_col_h = "모집단위"
+        elif "모집단위명" in h.columns:
+            dept_col_h = "모집단위명"
+        else:
+            dept_col_h = None
+
+        group_cols = ["대학명"]
+        if dept_col_h:
+            group_cols.append(dept_col_h)
+
+        grp = h.groupby(group_cols)["대표등급"]
+        stats = grp.agg(
+            평균등급="mean",
+            q50=lambda s: s.quantile(0.5),
+            q70=lambda s: s.quantile(0.7),
+            q80=lambda s: s.quantile(0.8),
+        ).reset_index()
+        stats["합격내신하위값"] = stats["q70"].fillna(stats["평균등급"])
+        HAM_ACCEPT_STATS = stats
+    else:
+        HAM_ACCEPT_STATS = None
+    # dept_col_h 변수 재사용 위해 전역에 저장
+    if "dept_col_h" not in globals():
+        dept_col_h = None
 
 
 # --------------------------------------------------
@@ -255,7 +338,7 @@ def view_ham_grade_analysis():
         )
 
     # 학과(모집단위) 필터
-    dept_col = "모집단위" if "모집단위" in df.columns else None
+    dept_col = "모집단위" if "모집단위" in df.columns else ("모집단위명" if "모집단위명" in df.columns else None)
     dept_opts = sorted(df[dept_col].dropna().unique().tolist()) if dept_col else []
     with f4:
         sel_depts = st.multiselect(
@@ -264,22 +347,23 @@ def view_ham_grade_analysis():
             default=None,
         )
 
-    # 필터 적용
+    # ---- 필터 적용 ----
+    df_filtered = df.copy()
     if sel_grades:
-        df = df[df["등급대"].isin(sel_grades)]
+        df_filtered = df_filtered[df_filtered["등급대"].isin(sel_grades)]
     if region_col and sel_regions:
-        df = df[df[region_col].isin(sel_regions)]
+        df_filtered = df_filtered[df_filtered[region_col].isin(sel_regions)]
     if univ_col and sel_univs:
-        df = df[df[univ_col].isin(sel_univs)]
+        df_filtered = df_filtered[df_filtered[univ_col].isin(sel_univs)]
     if dept_col and sel_depts:
-        df = df[df[dept_col].isin(sel_depts)]
+        df_filtered = df_filtered[df_filtered[dept_col].isin(sel_depts)]
 
-    if df.empty:
+    if df_filtered.empty:
         st.warning("선택한 필터 조건에 맞는 데이터가 없습니다.")
         return
 
     # 합격자만 추려서 분포 시각화
-    admit_df = df[df["합격여부"] == "합격"].copy()
+    admit_df = df_filtered[df_filtered["합격여부"] == "합격"].copy()
     if admit_df.empty:
         st.info("현재 필터 조건에 해당하는 합격자가 없습니다.")
     else:
@@ -326,23 +410,30 @@ def view_ham_grade_analysis():
                 st.info("전형 정보가 없어 전형 분포를 그릴 수 없습니다.")
 
     st.markdown("---")
-    st.markdown("#### 필터 조건에 따른 상세 표 (지원·합격 인원)")
+    st.markdown("#### 필터 조건에 따른 상세 합격 학과 목록")
 
-    gb_cols = ["등급대", "합격여부"]
+    # ✅ 필터된 데이터 + 합격자만, "인원" 대신 학과를 그대로 보여주는 상세표
+    if admit_df.empty:
+        st.info("합격자 데이터가 없어 상세 학과 목록을 보여줄 수 없습니다.")
+        return
+
+    cols_for_table = []
+    if "등급대" in admit_df.columns:
+        cols_for_table.append("등급대")
+    if region_col:
+        cols_for_table.append(region_col)
     if univ_col:
-        gb_cols.append(univ_col)
-    if "전형유형" in df.columns:
-        gb_cols.append("전형유형")
-    if "전형대분류" in df.columns:
-        gb_cols.append("전형대분류")
+        cols_for_table.append(univ_col)
+    if dept_col:
+        cols_for_table.append(dept_col)
+    if "전형유형" in admit_df.columns:
+        cols_for_table.append("전형유형")
+    if "전형대분류" in admit_df.columns:
+        cols_for_table.append("전형대분류")
+    cols_for_table.append("대표등급")
 
-    pivot = (
-        df.groupby(gb_cols)["이름"]
-        .count()
-        .reset_index(name="인원")
-        .sort_values(gb_cols + ["인원"], ascending=[True] * len(gb_cols) + [False])
-    )
-    st.dataframe(pivot, use_container_width=True, height=400)
+    table_df = admit_df[cols_for_table].sort_values(cols_for_table[:-1] + ["대표등급"])
+    st.dataframe(table_df, use_container_width=True, height=450)
 
 
 # --------------------------------------------------
@@ -453,9 +544,16 @@ def view_recommend():
                 | su_filtered["전형세부유형"].astype(str).str.contains(pattern, na=False)
             ]
 
-        # 정시 평균 백분위(대학 기준) 병합
-        if JEONG_UNIV_SCORE is not None:
-            su_filtered = su_filtered.merge(JEONG_UNIV_SCORE, on="대학명", how="left")
+        # ✅ 정시 평균백분위: 같은 대학+학과의 일반전형 정시입결에서 가져오기
+        if JEONG_DEPT_GENERAL is not None and "모집단위명" in su_filtered.columns:
+            su_filtered = su_filtered.merge(
+                JEONG_DEPT_GENERAL,
+                left_on=["대학명", "모집단위명"],
+                right_on=["대학명", "모집단위"],
+                how="left",
+            )
+            if "모집단위" in su_filtered.columns:
+                su_filtered = su_filtered.drop(columns=["모집단위"])
 
         if not su_filtered.empty:
             su_filtered["내신기준"] = hs_grade
@@ -490,7 +588,7 @@ def view_recommend():
             st.info("선택한 조건에 맞는 수시 데이터가 없습니다.")
 
         # ----- 정시 추천 -----
-        if jeong is not None and not jeong.empty:
+        if jeong is not None and not jeong.empty and JEONG_SCORE_COL:
             j = jeong.copy()
 
             if pattern:
@@ -499,28 +597,34 @@ def view_recommend():
                     | j["모집단위"].astype(str).str.contains(pattern, na=False)
                 ]
 
-            score_col = JEONG_SCORE_COL
-            if score_col and not j.empty:
-                j = to_numeric(j, [score_col])
-                j = j.dropna(subset=[score_col])
-                j["diff"] = (j[score_col] - bw_input).abs()
+            j = to_numeric(j, [JEONG_SCORE_COL])
+            j = j.dropna(subset=[JEONG_SCORE_COL])
+            if j.empty:
+                st.info("정시 데이터에 반영영역 평균백분위 정보가 없거나, 검색 조건에 맞는 데이터가 없습니다.")
+            else:
+                j["diff"] = (j[JEONG_SCORE_COL] - bw_input).abs()
                 j = j.sort_values("diff")
                 rec = j.head(5)
 
-                # 함창고 수시 평균 내신 병합
-                if HAM_SUSI_AVG is not None:
-                    rec = rec.merge(HAM_SUSI_AVG, on="대학명", how="left")
+                # ✅ 수시 평균내신: 수시 입결(어디가)에서 같은 대학+학과의 교과전형 대표값
+                if SU_DEPT_AVG is not None:
+                    rec = rec.merge(
+                        SU_DEPT_AVG,
+                        left_on=["대학명", "모집단위"],
+                        right_on=["대학명", "모집단위명"],
+                        how="left",
+                    )
+                    if "모집단위명" in rec.columns:
+                        rec = rec.drop(columns=["모집단위명"])
 
                 st.markdown("#### 정시 추천 (어디가 2025 정시 데이터 기반, 실험적)")
-                cols_rec = ["대학명", "전형명", "모집군", "모집단위", score_col]
+                cols_rec = ["대학명", "전형명", "모집군", "모집단위", JEONG_SCORE_COL]
                 if "수시평균내신" in rec.columns:
                     cols_rec.append("수시평균내신")
                 st.dataframe(
                     rec[cols_rec],
                     use_container_width=True,
                 )
-            else:
-                st.info("정시 데이터에 반영영역 평균백분위 정보가 없거나, 검색 조건에 맞는 데이터가 없습니다.")
         else:
             st.info("정시 데이터가 없어 추천을 만들기 어렵습니다.")
 
@@ -624,7 +728,7 @@ def view_choejeo():
     with colr2:
         kw = st.text_input("대학/학과/내용 검색 키워드", "")
 
-    my_hs_grade = st.number_input("내 내신(대표 등급)", 1.0, 9.0, 3.0, step=0.1)
+    my_hs_grade = st.number_input("내 내신(대표 등급, 참고용)", 1.0, 9.0, 3.0, step=0.1)
 
     grades = {
         "국어": g_kor,
@@ -661,35 +765,41 @@ def view_choejeo():
             st.warning("입력한 과목별 등급으로 충족 가능한 최저 기준 대학이 없습니다.")
             return
 
-        # 수시 평균내신 병합 및 내신 ±0.5 필터
-        if HAM_SUSI_AVG is None:
-            st.info("함창고 수시 입결 데이터가 없어 수시 평균내신 기준 필터링을 할 수 없습니다.")
-            return
+        # ✅ 함창고 합격 내신 통계(평균/50/70/80) 병합 (학과까지 매칭되면 학과 기준, 아니면 대학 기준)
+        if HAM_ACCEPT_STATS is not None:
+            stats = HAM_ACCEPT_STATS.copy()
+            if "모집단위명" in df_ok.columns and dept_col_h in stats.columns:
+                df_ok = df_ok.merge(
+                    stats,
+                    left_on=["대학명", "모집단위명"],
+                    right_on=["대학명", dept_col_h],
+                    how="left",
+                )
+                if dept_col_h in df_ok.columns:
+                    df_ok = df_ok.drop(columns=[dept_col_h])
+            else:
+                df_ok = df_ok.merge(stats, on="대학명", how="left")
 
-        df_ok = df_ok.merge(HAM_SUSI_AVG, on="대학명", how="left")
-        df_ok = df_ok[df_ok["수시평균내신"].notna()]
-        df_ok["내신차이"] = (df_ok["수시평균내신"] - my_hs_grade).abs()
-        df_ok = df_ok[df_ok["내신차이"] <= 0.5]
+        st.markdown("#### 최저 기준을 충족할 가능성이 있는 대학 목록")
+        cols_show = [
+            "지역구분",
+            "대학명",
+            "전형세부유형",
+            "모집단위명",
+            "최저학력기준 내용",
+        ]
+        for extra in ["합격내신하위값", "평균등급", "q50", "q70", "q80"]:
+            if extra in df_ok.columns:
+                cols_show.append(extra)
 
-        if df_ok.empty:
-            st.warning("입력한 내신과 ±0.5 이내에 해당하는 수시 평균내신 사례가 없습니다.")
-            return
-
-        st.markdown("#### 최저 기준과 내신 ±0.5 이내를 동시에 만족하는 대학 목록")
         st.dataframe(
-            df_ok[
-                [
-                    "지역구분",
-                    "대학명",
-                    "전형세부유형",
-                    "모집단위명",
-                    "최저학력기준 내용",
-                    "수시평균내신",
-                    "내신차이",
-                ]
-            ],
+            df_ok[cols_show],
             use_container_width=True,
-            height=400,
+            height=450,
+        )
+        st.caption(
+            "※ 합격내신하위값: 함창고 합격자의 약 70% 지점 기준(데이터 상황에 따라 평균값으로 대체).  "
+            f"내 내신: {my_hs_grade:.2f}등급 (참고용)"
         )
 
 
@@ -704,19 +814,20 @@ elif main_menu == "최저기준으로 대학찾기":
     view_choejeo()
 
 # --------------------------------------------------
-# 좌측 상단 제작자 표시
+# 중앙 하단 제작자 표시
 # --------------------------------------------------
 st.markdown(
     """
     <div style="
         position: fixed;
-        top: 8px;
-        left: 12px;
-        font-size: 0.85rem;
-        color: #cccccc;
-        background-color: rgba(0,0,0,0.4);
-        padding: 4px 8px;
-        border-radius: 4px;
+        bottom: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 0.95rem;
+        color: #dddddd;
+        background-color: rgba(0,0,0,0.55);
+        padding: 4px 12px;
+        border-radius: 6px;
         z-index: 9999;">
         제작자 함창고 교사 박호종
     </div>
