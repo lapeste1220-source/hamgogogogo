@@ -130,25 +130,33 @@ if SUJI_HAS_DATA:
 # ---------------- 학생 입력 유틸 ----------------
 def get_student_inputs():
     st.markdown("#### 1) 내 기본 성적 입력")
-    col1, col2 = st.columns(2)
-    with col1:
-        my_grade = st.number_input(
-            "내신 대표 등급(전교과 또는 국수영 평균)",
-            min_value=1.0, max_value=9.0, step=1.0, value=3.0  # ★ step 1.0
-        )
-    with col2:
-        st.write("최근 모의고사 등급 입력 (없으면 0으로 두세요)")
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        g_kor = st.number_input("국어 등급", 0.0, 9.0, 0.0, 1.0)   # ★ step 1.0
-        g_math = st.number_input("수학 등급", 0.0, 9.0, 0.0, 1.0)  # ★
-    with c2:
-        g_eng = st.number_input("영어 등급", 0.0, 9.0, 0.0, 1.0)   # ★
-        g_t1 = st.number_input("탐구1 등급", 0.0, 9.0, 0.0, 1.0)   # ★
-    with c3:
-        g_t2 = st.number_input("탐구2 등급", 0.0, 9.0, 0.0, 1.0)   # ★
-        g_hist = st.number_input("한국사 등급", 0.0, 9.0, 0.0, 1.0) # ★
+    # 내신 대표 등급
+    my_grade = st.number_input(
+        "내신 대표 등급(전교과 또는 국수영 평균)",
+        min_value=1.0, max_value=9.0, step=1.0, value=3.0
+    )
+
+    # 바로 아래에 모의고사 안내
+    st.write("최근 모의고사 등급을 입력해 주세요. (없으면 0으로 두세요)")
+
+    # 1행: 국어 / 영어 / 수학
+    row1_col1, row1_col2, row1_col3 = st.columns(3)
+    with row1_col1:
+        g_kor = st.number_input("국어 등급", 0.0, 9.0, 0.0, 1.0)
+    with row1_col2:
+        g_eng = st.number_input("영어 등급", 0.0, 9.0, 0.0, 1.0)
+    with row1_col3:
+        g_math = st.number_input("수학 등급", 0.0, 9.0, 0.0, 1.0)
+
+    # 2행: 탐구1 / 탐구2 / 한국사
+    row2_col1, row2_col2, row2_col3 = st.columns(3)
+    with row2_col1:
+        g_t1 = st.number_input("탐구1 등급", 0.0, 9.0, 0.0, 1.0)
+    with row2_col2:
+        g_t2 = st.number_input("탐구2 등급", 0.0, 9.0, 0.0, 1.0)
+    with row2_col3:
+        g_hist = st.number_input("한국사 등급", 0.0, 9.0, 0.0, 1.0)
 
     # 정시용 백분위 대략 환산
     grade_list = [g for g in [g_kor, g_math, g_eng, g_t1, g_t2] if g > 0]
@@ -267,7 +275,7 @@ def view_grade_analysis():
 
     admit_only = filtered[filtered["합격"]]
 
-    # --------- 합격자 지역 분포 (Altair, 정렬 + 글자 가로) ----------
+    # --------- 합격자 지역 분포 ----------
     st.subheader("합격자 지역 분포")
     if admit_only.empty:
         st.info("선택한 조건에 해당하는 합격 데이터가 없습니다.")
@@ -332,39 +340,6 @@ def view_grade_analysis():
             )
         )
         st.altair_chart(pie, use_container_width=True)
-
-        # 농어촌만 따로 떼어 교과/종합 구분
-        st.markdown("##### 농어촌 전형 내 교과/종합 분포")
-        rural = base[base["전형분류"] == "농어촌"].copy()
-        if rural.empty:
-            st.info("농어촌 전형 합격 데이터가 없습니다.")
-        else:
-            # 전형세부유형 또는 전형명에서 교과/종합 추출
-            if "전형세부유형" in rural.columns:
-                sub_src = rural["전형세부유형"].astype(str)
-            else:
-                sub_src = rural[vt_col].astype(str)
-
-            rural = rural.assign(
-                농어촌세부=lambda _: sub_src.str.extract("(교과|종합)", expand=False).fillna("기타")
-            )
-
-            rural_ct = (
-                rural.groupby("농어촌세부")
-                .size()
-                .reset_index(name="합격자수")
-            )
-
-            rural_pie = (
-                alt.Chart(rural_ct)
-                .mark_arc()
-                .encode(
-                    theta="합격자수:Q",
-                    color="농어촌세부:N",
-                    tooltip=["농어촌세부", "합격자수"],
-                )
-            )
-            st.altair_chart(rural_pie, use_container_width=True)
 
     # --------- 상세 표 (우리 학교 입결) ----------
     st.markdown("---")
@@ -546,19 +521,19 @@ def view_choejeo():
     st.markdown("### 1) 내 희망 최저 기준 입력")
     row1 = st.columns(3)
     with row1[0]:
-        g_k = st.number_input("국어 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_k")   # ★ step 1.0
+        g_k = st.number_input("국어 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_k")
     with row1[1]:
-        g_e = st.number_input("영어 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_e")   # ★
+        g_e = st.number_input("영어 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_e")
     with row1[2]:
-        g_m = st.number_input("수학 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_m")   # ★
+        g_m = st.number_input("수학 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_m")
 
     row2 = st.columns(3)
     with row2[0]:
-        g_t1 = st.number_input("탐구1 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_t1") # ★
+        g_t1 = st.number_input("탐구1 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_t1")
     with row2[1]:
-        g_t2 = st.number_input("탐구2 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_t2") # ★
+        g_t2 = st.number_input("탐구2 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_t2")
     with row2[2]:
-        g_h = st.number_input("한국사 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_h") # ★
+        g_h = st.number_input("한국사 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_h")
 
     st.caption("※ 0으로 두면 해당 과목은 최저 기준에서 고려하지 않습니다. 실제 대학별 세부 조건과는 차이가 있을 수 있습니다.")
 
