@@ -158,12 +158,70 @@ def view_ham_grade_analysis():
         st.info("함창고 수시진학관리 데이터가 없어 분석을 진행할 수 없습니다.")
         return
 
+    df = suji.copy()
+
+    st.markdown("### 필터 선택")
+
+    f1, f2, f3, f4 = st.columns(4)
+
+    # 등급대 필터
+    grade_opts = sorted(df["등급대"].dropna().unique().tolist())
+    with f1:
+        sel_grades = st.multiselect("등급대", grade_opts, default=grade_opts)
+
+    # 지역 필터
+    region_col = "지역" if "지역" in df.columns else None
+    if region_col:
+        region_opts = sorted(df[region_col].dropna().unique().tolist())
+    else:
+        region_opts = []
+    with f2:
+        sel_regions = st.multiselect(
+            "지역",
+            region_opts,
+            default=region_opts if region_opts else None,
+        )
+
+    # 대학명 필터
+    univ_col = "대학명" if "대학명" in df.columns else None
+    univ_opts = sorted(df[univ_col].dropna().unique().tolist()) if univ_col else []
+    with f3:
+        sel_univs = st.multiselect(
+            "대학",
+            univ_opts,
+            default=None,
+        )
+
+    # 학과(모집단위) 필터
+    dept_col = "모집단위" if "모집단위" in df.columns else None
+    dept_opts = sorted(df[dept_col].dropna().unique().tolist()) if dept_col else []
+    with f4:
+        sel_depts = st.multiselect(
+            "학과(모집단위)",
+            dept_opts,
+            default=None,
+        )
+
+    # 필터 적용
+    if sel_grades:
+        df = df[df["등급대"].isin(sel_grades)]
+    if region_col and sel_regions:
+        df = df[df[region_col].isin(sel_regions)]
+    if univ_col and sel_univs:
+        df = df[df[univ_col].isin(sel_univs)]
+    if dept_col and sel_depts:
+        df = df[df[dept_col].isin(sel_depts)]
+
+    if df.empty:
+        st.warning("선택한 필터 조건에 맞는 데이터가 없습니다.")
+        return
+
     col1, col2 = st.columns(2)
 
     with col1:
         st.markdown("#### 등급대별 지원 인원")
         grp = (
-            suji.groupby("등급대")["이름"]
+            df.groupby("등급대")["이름"]
             .count()
             .reset_index(name="지원인원")
             .sort_values("등급대")
@@ -181,7 +239,7 @@ def view_ham_grade_analysis():
     with col2:
         st.markdown("#### 등급대별 합격 인원")
         grp2 = (
-            suji[suji["합격여부"] == "합격"]
+            df[df["합격여부"] == "합격"]
             .groupby("등급대")["이름"]
             .count()
             .reset_index(name="합격인원")
@@ -202,12 +260,18 @@ def view_ham_grade_analysis():
 
     st.markdown("---")
     st.markdown("#### 등급대별 지원·합격 대학/전형 분포 (표)")
+
+    gb_cols = ["등급대", "합격여부"]
+    if univ_col:
+        gb_cols.append(univ_col)
+    if "전형유형" in df.columns:
+        gb_cols.append("전형유형")
+
     pivot = (
-        suji.groupby(["등급대", "합격여부", "대학명", "전형유형"])
-        ["이름"]
+        df.groupby(gb_cols)["이름"]
         .count()
         .reset_index(name="인원")
-        .sort_values(["등급대", "합격여부", "인원"], ascending=[True, False, False])
+        .sort_values(gb_cols + ["인원"], ascending=[True] * len(gb_cols) + [False])
     )
     st.dataframe(pivot, use_container_width=True, height=400)
 
@@ -299,14 +363,26 @@ def view_recommend():
     st.markdown("---")
     st.markdown("### 4) 수시·정시 간단 추천 (실험적)")
 
+    # 대학/학과 키워드 검색
+    kw_reco = st.text_input("대학/학과 키워드 (선택)", "")
+
     st.caption("※ 어디가 2025 수시/정시 데이터를 단순 필터링한 참고용 결과입니다. "
                "최종 지원 여부는 반드시 학교와 상의하세요.")
 
     if st.button("추천 대학 검색"):
-        # 수시: 지역 필터 + 단순 분할
+        pattern = kw_reco.strip()
+
+        # 수시: 지역 필터 + 키워드 필터
         su_filtered = su.copy()
         if "지역구분" in su_filtered.columns and hope_regions:
             su_filtered = su_filtered[su_filtered["지역구분"].isin(hope_regions)]
+
+        if pattern:
+            su_filtered = su_filtered[
+                su_filtered["대학명"].astype(str).str.contains(pattern, na=False)
+                | su_filtered["모집단위명"].astype(str).str.contains(pattern, na=False)
+                | su_filtered["전형세부유형"].astype(str).str.contains(pattern, na=False)
+            ]
 
         if not su_filtered.empty:
             su_filtered["내신기준"] = hs_grade
@@ -329,15 +405,22 @@ def view_recommend():
         else:
             st.info("선택한 조건에 맞는 수시 데이터가 없습니다.")
 
-        # 정시: 반영영역 평균백분위와 비교
+        # 정시: 반영영역 평균백분위와 비교 + 키워드 필터
         if jeong is not None and not jeong.empty:
             j = jeong.copy()
+
+            if pattern:
+                j = j[
+                    j["대학명"].astype(str).str.contains(pattern, na=False)
+                    | j["모집단위"].astype(str).str.contains(pattern, na=False)
+                ]
+
             score_col = None
             for c in j.columns:
                 if "평균백분위" in c:
                     score_col = c
                     break
-            if score_col:
+            if score_col and not j.empty:
                 j = to_numeric(j, [score_col])
                 j = j.dropna(subset=[score_col])
                 j["diff"] = (j[score_col] - bw_input).abs()
@@ -349,7 +432,7 @@ def view_recommend():
                     use_container_width=True,
                 )
             else:
-                st.info("정시 데이터에 반영영역 평균백분위 정보가 없어 추천을 만들기 어렵습니다.")
+                st.info("정시 데이터에 반영영역 평균백분위 정보가 없거나, 검색 조건에 맞는 데이터가 없습니다.")
         else:
             st.info("정시 데이터가 없어 추천을 만들기 어렵습니다.")
 
@@ -451,7 +534,7 @@ def view_choejeo():
             default=default_regions if default_regions else region_all,
         )
     with colr2:
-        kw = st.text_input("검색 키워드 (대학명/모집단위/내용 일부)", "")
+        kw = st.text_input("대학/학과/내용 검색 키워드", "")
 
     my_hs_grade = st.number_input("내 내신(대표 등급, 선택)", 1.0, 9.0, 3.0, step=0.1)
 
@@ -558,18 +641,23 @@ elif main_menu == "수시·정시 추천 탐색기":
 elif main_menu == "최저기준으로 대학찾기":
     view_choejeo()
 
-
-# ---------------- 화면 좌측 하단 '제작자' 표시 ----------------
+# --------------------------------------------------
+# 좌측 상단 제작자 표시
+# --------------------------------------------------
 st.markdown(
     """
-    <div style="position: fixed; bottom: 10px; left: 10px; 
-                font-size: 0.9rem; color: gray; background-color: rgba(255,255,255,0.7);
-                padding: 4px 8px; border-radius: 4px;">
-        제작자 함창고 국어교사 박호종
+    <div style="
+        position: fixed;
+        top: 8px;
+        left: 12px;
+        font-size: 0.85rem;
+        color: #cccccc;
+        background-color: rgba(0,0,0,0.4);
+        padding: 4px 8px;
+        border-radius: 4px;
+        z-index: 9999;">
+        제작자 함창고 교사 박호종
     </div>
     """,
     unsafe_allow_html=True,
 )
-
-
-
