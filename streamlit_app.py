@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit as st 
 import pandas as pd
 import numpy as np
 import datetime
@@ -134,21 +134,21 @@ def get_student_inputs():
     with col1:
         my_grade = st.number_input(
             "내신 대표 등급(전교과 또는 국수영 평균)",
-            min_value=1.0, max_value=9.0, step=0.1, value=3.0
+            min_value=1.0, max_value=9.0, step=1.0, value=3.0  # ★ step 1.0
         )
     with col2:
         st.write("최근 모의고사 등급 입력 (없으면 0으로 두세요)")
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        g_kor = st.number_input("국어 등급", 0.0, 9.0, 0.0, 0.5)
-        g_math = st.number_input("수학 등급", 0.0, 9.0, 0.0, 0.5)
+        g_kor = st.number_input("국어 등급", 0.0, 9.0, 0.0, 1.0)   # ★ step 1.0
+        g_math = st.number_input("수학 등급", 0.0, 9.0, 0.0, 1.0)  # ★
     with c2:
-        g_eng = st.number_input("영어 등급", 0.0, 9.0, 0.0, 0.5)
-        g_t1 = st.number_input("탐구1 등급", 0.0, 9.0, 0.0, 0.5)
+        g_eng = st.number_input("영어 등급", 0.0, 9.0, 0.0, 1.0)   # ★
+        g_t1 = st.number_input("탐구1 등급", 0.0, 9.0, 0.0, 1.0)   # ★
     with c3:
-        g_t2 = st.number_input("탐구2 등급", 0.0, 9.0, 0.0, 0.5)
-        g_hist = st.number_input("한국사 등급", 0.0, 9.0, 0.0, 0.5)
+        g_t2 = st.number_input("탐구2 등급", 0.0, 9.0, 0.0, 1.0)   # ★
+        g_hist = st.number_input("한국사 등급", 0.0, 9.0, 0.0, 1.0) # ★
 
     # 정시용 백분위 대략 환산
     grade_list = [g for g in [g_kor, g_math, g_eng, g_t1, g_t2] if g > 0]
@@ -229,15 +229,26 @@ def view_grade_analysis():
         return
 
     df = suji_df.copy()
+    df = df.dropna(subset=["대표등급"])  # 대표등급 없는 것은 제외
 
     # 필터 UI
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        grade_band = st.selectbox(
-            "등급대 선택",
-            options=sorted(df["등급대"].unique()),
-            index=1 if "2등급대" in df["등급대"].unique() else 0,
-        )
+        st.markdown("**대표등급 범위 설정**")
+        g1, g2 = st.columns(2)
+        with g1:
+            min_grade = st.number_input(
+                "최소 등급",
+                min_value=1.0, max_value=9.0, value=1.0, step=0.5
+            )
+        with g2:
+            max_grade = st.number_input(
+                "최대 등급",
+                min_value=1.0, max_value=9.0, value=3.0, step=0.5
+            )
+        if min_grade > max_grade:
+            min_grade, max_grade = max_grade, min_grade
+
     with col2:
         region = st.multiselect("지역 선택", options=sorted(df["지역"].dropna().unique()))
     with col3:
@@ -245,7 +256,8 @@ def view_grade_analysis():
     with col4:
         major = st.text_input("학과(모집단위) 키워드", "")
 
-    filtered = df[df["등급대"] == grade_band]
+    # 등급 범위 필터 적용
+    filtered = df[(df["대표등급"] >= min_grade) & (df["대표등급"] <= max_grade)]
     if region:
         filtered = filtered[filtered["지역"].isin(region)]
     if univ:
@@ -534,19 +546,19 @@ def view_choejeo():
     st.markdown("### 1) 내 희망 최저 기준 입력")
     row1 = st.columns(3)
     with row1[0]:
-        g_k = st.number_input("국어 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 0.5, key="min_k")
+        g_k = st.number_input("국어 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_k")   # ★ step 1.0
     with row1[1]:
-        g_e = st.number_input("영어 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 0.5, key="min_e")
+        g_e = st.number_input("영어 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_e")   # ★
     with row1[2]:
-        g_m = st.number_input("수학 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 0.5, key="min_m")
+        g_m = st.number_input("수학 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_m")   # ★
 
     row2 = st.columns(3)
     with row2[0]:
-        g_t1 = st.number_input("탐구1 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 0.5, key="min_t1")
+        g_t1 = st.number_input("탐구1 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_t1") # ★
     with row2[1]:
-        g_t2 = st.number_input("탐구2 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 0.5, key="min_t2")
+        g_t2 = st.number_input("탐구2 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_t2") # ★
     with row2[2]:
-        g_h = st.number_input("한국사 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 0.5, key="min_h")
+        g_h = st.number_input("한국사 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_h") # ★
 
     st.caption("※ 0으로 두면 해당 과목은 최저 기준에서 고려하지 않습니다. 실제 대학별 세부 조건과는 차이가 있을 수 있습니다.")
 
