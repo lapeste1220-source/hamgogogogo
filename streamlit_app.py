@@ -1,6 +1,7 @@
 # streamlit_app.py
 # -*- coding: utf-8 -*-
 import datetime as dt
+import re
 from pathlib import Path
 
 import numpy as np
@@ -35,8 +36,10 @@ def _safe_read_csv(relative_name: str) -> pd.DataFrame | None:
     """여러 인코딩을 시도하며 CSV를 읽는다. 없으면 경고만 띄우고 None 반환."""
     path = BASE_DIR / relative_name
     if not path.exists():
-        st.error(f"⚠️ 파일을 찾을 수 없습니다: {relative_name}  \n"
-                 f"→ GitHub 리포지토리 루트에 동일한 이름으로 업로드했는지 확인해 주세요.")
+        st.error(
+            f"⚠️ 파일을 찾을 수 없습니다: {relative_name}  \n"
+            f"→ GitHub 리포지토리 루트에 동일한 이름으로 업로드했는지 확인해 주세요."
+        )
         return None
 
     for enc in ("utf-8-sig", "cp949", "euc-kr"):
@@ -104,7 +107,6 @@ def preprocess_su(df: pd.DataFrame | None) -> pd.DataFrame | None:
     if df is None:
         return None
     df = df.copy()
-    # 주요 컬럼 숫자화
     df = to_numeric(df, ["모집인원", "선발비율", "전형총점"])
     return df
 
@@ -113,7 +115,6 @@ def preprocess_jeong(df: pd.DataFrame | None) -> pd.DataFrame | None:
     if df is None:
         return None
     df = df.copy()
-    # 반영영역 평균백분위 / 평균등급 숫자화
     num_cols = [c for c in df.columns if "평균백분위" in c or "평균등급" in c]
     df = to_numeric(df, num_cols)
     return df
@@ -298,21 +299,19 @@ def view_recommend():
     st.markdown("---")
     st.markdown("### 4) 수시·정시 간단 추천 (실험적)")
 
-    st.caption("※ 어디가 2025 수시/정시 데이터를 단순 필터링한 참고용 결과입니다. 최종 지원 여부는 반드시 학교와 상의하세요.")
+    st.caption("※ 어디가 2025 수시/정시 데이터를 단순 필터링한 참고용 결과입니다. "
+               "최종 지원 여부는 반드시 학교와 상의하세요.")
 
     if st.button("추천 대학 검색"):
-        # 수시: 지역 필터 + 내신 등급 기준 단순 필터
+        # 수시: 지역 필터 + 단순 분할
         su_filtered = su.copy()
         if "지역구분" in su_filtered.columns and hope_regions:
             su_filtered = su_filtered[su_filtered["지역구분"].isin(hope_regions)]
 
-        # 내신이 좋을수록 상향/적정/안전 기준을 낮게 잡는다 (단순 모델)
         if not su_filtered.empty:
             su_filtered["내신기준"] = hs_grade
-            # 여기서는 등급 수치 대신 전형총점 기준이 없으므로 랜덤 섞기 후 상/중/하 구분
             su_filtered = su_filtered.sample(frac=1.0, random_state=42)
 
-            # 상향/적정/안전 단순 분할
             n = min(50, len(su_filtered))
             top = su_filtered.head(n)
 
@@ -333,7 +332,6 @@ def view_recommend():
         # 정시: 반영영역 평균백분위와 비교
         if jeong is not None and not jeong.empty:
             j = jeong.copy()
-            # 반영영역 평균백분위 / 평균등급 중 하나 사용
             score_col = None
             for c in j.columns:
                 if "평균백분위" in c:
@@ -342,7 +340,6 @@ def view_recommend():
             if score_col:
                 j = to_numeric(j, [score_col])
                 j = j.dropna(subset=[score_col])
-                # 입력 백분위 근처(±5)에서 5개 추천
                 j["diff"] = (j[score_col] - bw_input).abs()
                 j = j.sort_values("diff")
                 rec = j.head(5)
@@ -360,6 +357,53 @@ def view_recommend():
 # --------------------------------------------------
 # 3-3. 최저기준으로 대학찾기
 # --------------------------------------------------
+def satisfies_choejeo_rule(text: str, grades: dict[str, float]) -> bool:
+    """
+    '최저학력기준 내용' 텍스트와 입력 등급을 가지고
+    '확실히 불충족'인 경우만 False, 나머지는 True 로 본다.
+    """
+    # 등급 하나도 안 넣으면 제한 없음
+    if all(v <= 0 for v in grades.values()):
+        return True
+
+    t = text.replace(" ", "")
+
+    # 1) 과목별 'X등급' 패턴 해석
+    subj_patterns = {
+        "국어": "국어",
+        "수학": "수학",
+        "영어": "영어",
+        "탐구": "탐구",
+        "한국사": "한국사",
+    }
+
+    for key, label in subj_patterns.items():
+        g = grades.get(key, 0)
+        if g <= 0:
+            continue
+        # 예) '국어3등급', '국어3등급이내'
+        m = re.search(label + r"(\d)등급", t)
+        if m:
+            limit = int(m.group(1))
+            if g > limit:
+                return False  # 요구 등급보다 나쁨
+
+    # 2) 'n합m' 패턴 해석 (예: 3합7, 3과목합7, 3개합7)
+    valid_grades = [v for v in grades.values() if v > 0]
+    if len(valid_grades) >= 2:
+        m2 = re.search(r"(\d)[과개]*합(\d+)", t)
+        if m2:
+            n = int(m2.group(1))
+            total_limit = int(m2.group(2))
+            if len(valid_grades) >= n:
+                best = sorted(valid_grades)[:n]
+                if sum(best) > total_limit:
+                    return False
+
+    # 그 외 복잡한 패턴은 '판단 불가 → 일단 통과'
+    return True
+
+
 def view_choejeo():
     st.subheader("최저기준으로 대학찾기")
 
@@ -369,21 +413,33 @@ def view_choejeo():
 
     st.markdown("### 1) 내 희망 최저 기준 입력")
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
+    # --- 과목 등급 입력 (2행 배치: 1행 국·영·수 / 2행 탐1·탐2·한국사) ---
+    row1 = st.columns(3)
+    with row1[0]:
         g_kor = st.number_input("국어 최대 등급 (0=미사용)", 0.0, 9.0, 0.0, step=0.5)
-        g_math = st.number_input("수학 최대 등급 (0=미사용)", 0.0, 9.0, 0.0, step=0.5)
-    with c2:
+    with row1[1]:
         g_eng = st.number_input("영어 최대 등급 (0=미사용)", 0.0, 9.0, 0.0, step=0.5)
+    with row1[2]:
+        g_math = st.number_input("수학 최대 등급 (0=미사용)", 0.0, 9.0, 0.0, step=0.5)
+
+    row2 = st.columns(3)
+    with row2[0]:
         g_t1 = st.number_input("탐구1 최대 등급 (0=미사용)", 0.0, 9.0, 0.0, step=0.5)
-    with c3:
+    with row2[1]:
         g_t2 = st.number_input("탐구2 최대 등급 (0=미사용)", 0.0, 9.0, 0.0, step=0.5)
+    with row2[2]:
         g_hist = st.number_input("한국사 최대 등급 (0=미사용)", 0.0, 9.0, 0.0, step=0.5)
 
-    st.caption("※ 0으로 두면 해당 과목은 최저 기준에서 고려하지 않습니다. "
-               "텍스트 기준 단순 검색이므로 실제 요강과 차이가 있을 수 있습니다.")
+    st.caption(
+        "※ 0으로 두면 해당 과목은 최저 기준에서 고려하지 않습니다. "
+        "텍스트 기준 단순 판독이므로 실제 요강과 차이가 있을 수 있습니다."
+    )
 
-    region_all = sorted(choejeo["지역구분"].dropna().unique().tolist()) if "지역구분" in choejeo.columns else []
+    region_all = (
+        sorted(choejeo["지역구분"].dropna().unique().tolist())
+        if "지역구분" in choejeo.columns
+        else []
+    )
     preferred = ["서울", "경기", "인천", "부산", "대구", "경북", "충북", "충남"]
     default_regions = [r for r in preferred if r in region_all]
 
@@ -399,6 +455,14 @@ def view_choejeo():
 
     my_hs_grade = st.number_input("내 내신(대표 등급, 선택)", 1.0, 9.0, 3.0, step=0.1)
 
+    grades = {
+        "국어": g_kor,
+        "영어": g_eng,
+        "수학": g_math,
+        "탐구": min(g_t1 if g_t1 > 0 else 10, g_t2 if g_t2 > 0 else 10),
+        "한국사": g_hist,
+    }
+
     if st.button("최저 기준에 맞는 대학 검색"):
         df = choejeo.copy()
         if regions:
@@ -412,52 +476,74 @@ def view_choejeo():
                 | df["최저학력기준 내용"].astype(str).str.contains(pattern, na=False)
             ]
 
-        # 과목별 단순 텍스트 필터 (해당 과목이 최저에 등장하는지 여부 위주)
-        def subj_filter(flag_grade, label):
-            if flag_grade is None or flag_grade <= 0:
-                return pd.Series([True] * len(df))
-            col = df["최저학력기준 내용"].astype(str)
-            return col.str.contains(label, na=False)
-
-        mask = (
-            subj_filter(g_kor, "국어")
-            & subj_filter(g_math, "수학")
-            & subj_filter(g_eng, "영어")
-            & subj_filter(g_t1, "탐구")
-            & subj_filter(g_t2, "탐구")
-            & subj_filter(g_hist, "한국사")
-        )
-        df = df[mask]
-
         if df.empty:
-            st.warning("입력한 조건에 맞는 최저 기준 데이터가 없습니다.")
+            st.warning("선택한 지역/키워드에 해당하는 최저 기준 데이터가 없습니다.")
             return
 
-        st.markdown("#### 어디가 최저 기준에 해당하는 대학 목록")
+        # 텍스트 + 등급을 이용한 최저 판독
+        df["최저충족가능"] = df["최저학력기준 내용"].astype(str).apply(
+            lambda txt: satisfies_choejeo_rule(txt, grades)
+        )
+        df_ok = df[df["최저충족가능"]].copy()
+
+        if df_ok.empty:
+            st.warning("입력한 과목별 등급으로 충족 가능한 최저 기준 대학이 없습니다.")
+            return
+
+        st.markdown("#### 어디가 최저 기준에 부합(또는 부적합이 확실하지 않은) 대학 목록")
         st.dataframe(
-            df[["지역구분", "대학명", "전형세부유형", "모집단위명", "최저학력기준 내용"]],
+            df_ok[
+                [
+                    "지역구분",
+                    "대학명",
+                    "전형세부유형",
+                    "모집단위명",
+                    "최저학력기준 내용",
+                ]
+            ],
             use_container_width=True,
             height=350,
         )
 
-        # 우리 학교 실제 합격 사례 매칭
+        # --- 우리 학교 합격 내신과 ±0.5 이내인 대학 찾기 ---
         if suji is not None and not suji.empty:
-            st.markdown("#### 우리 학교 실제 합격 사례 (참고)")
-            # 대학명 기준 단순 매칭
-            cand_unis = df["대학명"].unique().tolist()
-            suji_match = suji[suji["대학명"].isin(cand_unis)].copy()
-            suji_match = suji_match[suji_match["대표등급"] <= my_hs_grade]
+            st.markdown("#### 우리 학교 합격 내신과 ±0.5 이내 대학 (참고)")
 
-            if suji_match.empty:
-                st.info("입력한 내신 등급과 조건에 맞는 우리 학교 합격 사례가 아직 없습니다.")
+            suji_admit = suji[
+                (suji["합격여부"] == "합격") & suji["대표등급"].notna()
+            ].copy()
+            if suji_admit.empty:
+                st.info("우리 학교 합격 내역이 부족하여 내신 비교를 할 수 없습니다.")
             else:
-                st.dataframe(
-                    suji_match[
-                        ["학년", "반", "번호", "이름", "대학명", "모집시기", "전형유형", "모집단위", "대표등급", "합격여부"]
-                    ].sort_values(["대표등급", "대학명"]),
-                    use_container_width=True,
-                    height=350,
+                stats = (
+                    suji_admit.groupby("대학명")["대표등급"]
+                    .median()
+                    .reset_index(name="우리학교_합격등급(중앙)")
                 )
+                merged = df_ok.merge(stats, on="대학명", how="left")
+                merged["내신차이"] = (merged["우리학교_합격등급(중앙)"] - my_hs_grade).abs()
+                candidates = merged[
+                    merged["우리학교_합격등급(중앙)"].notna()
+                    & (merged["내신차이"] <= 0.5)
+                ].sort_values("내신차이")
+
+                if candidates.empty:
+                    st.info("입력한 내신과 ±0.5 이내에 해당하는 우리 학교 합격 사례가 없습니다.")
+                else:
+                    st.dataframe(
+                        candidates[
+                            [
+                                "대학명",
+                                "전형세부유형",
+                                "모집단위명",
+                                "최저학력기준 내용",
+                                "우리학교_합격등급(중앙)",
+                                "내신차이",
+                            ]
+                        ],
+                        use_container_width=True,
+                        height=350,
+                    )
         else:
             st.info("함창고 수시진학관리 데이터가 없어 우리 학교 합격 사례를 보여줄 수 없습니다.")
 
@@ -484,5 +570,6 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
 
 
