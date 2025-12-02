@@ -137,8 +137,14 @@ def get_student_inputs():
         min_value=1.0, max_value=9.0, step=1.0, value=3.0
     )
 
-    # 바로 아래에 모의고사 안내
-    st.write("최근 모의고사 등급을 입력해 주세요. (없으면 0으로 두세요)")
+    # 바로 아래에 모의고사 안내 + 백분위 평균
+    st.write("최근 모의고사 등급과 백분위 평균을 입력해 주세요. (없으면 0으로 두세요)")
+
+    mock_percentile_input = st.number_input(
+        "최근 모의고사 백분위 평균(없으면 0)",
+        min_value=0.0, max_value=100.0, value=0.0, step=1.0
+    )
+    mock_percentile = mock_percentile_input if mock_percentile_input > 0 else None
 
     # 1행: 국어 / 영어 / 수학
     row1_col1, row1_col2, row1_col3 = st.columns(3)
@@ -158,15 +164,7 @@ def get_student_inputs():
     with row2_col3:
         g_hist = st.number_input("한국사 등급", 0.0, 9.0, 0.0, 1.0)
 
-    # 정시용 백분위 대략 환산
-    grade_list = [g for g in [g_kor, g_math, g_eng, g_t1, g_t2] if g > 0]
-    if grade_list:
-        mapping = {1: 96, 2: 89, 3: 77, 4: 62, 5: 47, 6: 32, 7: 20, 8: 11, 9: 4}
-        perc = [mapping.get(int(round(g)), 50) for g in grade_list]
-        mock_percentile = float(np.mean(perc))
-    else:
-        mock_percentile = None
-
+    # 지역 선택
     region_options = ["서울", "경기", "인천", "부산", "대구", "경북", "충북", "충남"]
     selected_regions = st.multiselect(
         "희망 지역 선택", options=region_options, default=region_options
@@ -390,23 +388,32 @@ def view_recommend():
                     .mean()
                     .rename(columns={"대표등급": "합격평균내신"})
                 )
+                # diff = 내신(입력) - 합격평균내신
                 agg["내신차이(내-합)"] = my_grade - agg["합격평균내신"]
 
+                # 등급은 낮을수록 좋은 성적이므로 방향을 반대로 해석
+                # 상향(도전): 내신이 합격평균보다 0.5 등급 이상 나쁠 때
+                # 적정: ±0.5 이내
+                # 안전: 내신이 합격평균보다 0.5 등급 이상 좋을 때
                 def label_row(d):
-                    diff = d["내신차이(내-합)"]
-                    if diff <= -0.7:
-                        return "하향(도전)"
-                    if diff <= 0.5:
-                        return "적정"
-                    return "안전"
+                    diff = d["내신차이(내-합)"]  # 양수: 내가 더 나쁨, 음수: 내가 더 좋음
+                    if diff > 0.5:
+                        return "상향(도전)"
+                    if diff < -0.5:
+                        return "안전"
+                    return "적정"
 
                 agg["추천구분"] = agg.apply(label_row, axis=1)
 
-                safe = agg[agg["추천구분"] == "안전"].nsmallest(2, "내신차이(내-합)")
-                mid = agg[agg["추천구분"] == "적정"].nsmallest(2, "내신차이(내-합)")
-                risk = agg[agg["추천구분"] == "하향(도전)"].nlargest(2, "내신차이(내-합)")
+                # 각 구분별로 2개씩 추천
+                safe = agg[agg["추천구분"] == "안전"].sort_values("내신차이(내-합)").head(2)
+                mid = agg[agg["추천구분"] == "적정"].iloc[
+                    (agg[agg["추천구분"] == "적정"]["내신차이(내-합)"].abs()).sort_values().index
+                ].head(2) if (agg["추천구분"] == "적정").any() else agg[agg["추천구분"] == "적정"]
+                risk = agg[agg["추천구분"] == "상향(도전)"].sort_values("내신차이(내-합)").head(2)
 
                 rec = pd.concat([safe, mid, risk], ignore_index=True)
+
                 cols = ["추천구분"] + [c for c in ["대학명", "모집단위", "전형유형"] if c in rec.columns] + ["합격평균내신", "내신차이(내-합)"]
                 if not rec.empty:
                     st.dataframe(rec[cols], use_container_width=True, hide_index=True)
@@ -415,13 +422,13 @@ def view_recommend():
 
     # ---- 정시 추천 : 어디가 정시 입결 기반 ----
     with tab_je:
-        st.subheader("정시 추천 대학 (모의고사 백분위 추정 기준)")
+        st.subheader("정시 추천 대학 (모의고사 백분위 평균 기준)")
 
         if jeong_df is None or JEONG_SCORE_COL is None:
             st.warning("어디가 정시 입결 데이터가 부족하여 정시 추천 계산을 할 수 없습니다.")
         else:
             if mock_percentile is None:
-                st.info("정시 추천을 위해서는 최근 모의고사 등급을 최소 한 과목 이상 입력해 주세요.")
+                st.info("정시 추천을 위해서는 '최근 모의고사 백분위 평균'을 입력해 주세요.")
             else:
                 dfj = jeong_df.copy()
                 if "지역구분" in dfj.columns and regions:
@@ -436,19 +443,29 @@ def view_recommend():
                     dfj["정시평균백분위"] = dfj[JEONG_SCORE_COL]
                     dfj["백분위차이(내-합)"] = mock_percentile - dfj["정시평균백분위"]
 
+                    # 백분위는 높을수록 좋은 성적
+                    # 상향(도전): 합격평균이 입력값보다 5p 이상 높을 때
+                    # 적정: ±5p 이내
+                    # 안전: 입력값이 합격평균보다 5p 이상 높을 때
                     def label_j(row):
-                        d = row["백분위차이(내-합)"]
-                        if d >= 7:
+                        diff = row["백분위차이(내-합)"]  # 양수: 내가 더 좋음, 음수: 내가 더 나쁨
+                        if diff > 5:
                             return "안전"
-                        if d >= -3:
-                            return "적정"
-                        return "하향(도전)"
+                        if diff < -5:
+                            return "상향(도전)"
+                        return "적정"
 
                     dfj["추천구분"] = dfj.apply(label_j, axis=1)
 
-                    safe = dfj[dfj["추천구분"] == "안전"].nlargest(2, "백분위차이(내-합)")
-                    mid = dfj[dfj["추천구분"] == "적정"].nlargest(2, "백분위차이(내-합)")
-                    risk = dfj[dfj["추천구분"] == "하향(도전)"].nsmallest(2, "백분위차이(내-합)")
+                    safe = dfj[dfj["추천구분"] == "안전"].sort_values("백분위차이(내-합)").head(2)
+                    mid_candidates = dfj[dfj["추천구분"] == "적정"]
+                    if not mid_candidates.empty:
+                        mid = mid_candidates.iloc[
+                            mid_candidates["백분위차이(내-합)"].abs().sort_values().index
+                        ].head(2)
+                    else:
+                        mid = mid_candidates
+                    risk = dfj[dfj["추천구분"] == "상향(도전)"].sort_values("백분위차이(내-합)", ascending=False).head(2)
 
                     recj = pd.concat([safe, mid, risk], ignore_index=True)
 
