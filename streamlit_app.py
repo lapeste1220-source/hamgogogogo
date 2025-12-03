@@ -449,6 +449,14 @@ def view_grade_analysis():
     else:
         detail["지원전형"] = detail.get("전형명(대)", "")
 
+    possible_cols = [c for c in detail.columns if "세부" in c or "전형" in c]
+
+    selected_col = None
+    for col in possible_cols:
+        if "세부" in col:
+           selected_col = col
+           break
+    
     if "전형세부유형" in detail.columns:
         detail["세부유형"] = detail["전형세부유형"]
     else:
@@ -767,6 +775,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
 
 
