@@ -498,7 +498,7 @@ def view_recommend():
 
     # ---- 수시 추천 : 함창고 입결 기반 ----
     with tab_su:
-        st.subheader("수시 추천 대학 (함창고 합격 내신 기준)")
+        st.subheader("수시 추천 대학 (어디가 사이트 입결 기준)")
 
         if not SUJI_HAS_DATA:
             st.warning(
@@ -529,9 +529,9 @@ def view_recommend():
                 def label_row(d):
                     diff = d["내신차이(합-입)"]
                     if diff > 0.3:
-                        return "상향(도전)"
+                        return "안전전"
                     if diff < -0.3:
-                        return "안전"
+                        return "상향(도전)"
                     return "적정"
 
                 agg["추천구분"] = agg.apply(label_row, axis=1)
@@ -754,3 +754,4 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
