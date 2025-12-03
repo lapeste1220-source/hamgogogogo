@@ -344,8 +344,29 @@ def view_grade_analysis():
     st.markdown("#### 필터 조건에 따른 상세 합격 학과 목록 (함창고 입결)")
 
     detail = admit_only.copy()
-    cols_for_table = ["학년", "반", "번호", "이름", "등급대", "대표등급", "지역", "대학명", "모집단위"]
+
+    # 지원전형 / 최저 생성
+    vt_main = detail["전형유형"] if "전형유형" in detail.columns else ""
+    vt_name = detail["전형명(대)"] if "전형명(대)" in detail.columns else ""
+    if isinstance(vt_main, pd.Series) and isinstance(vt_name, pd.Series):
+        detail["지원전형"] = (vt_main.astype(str).fillna("") + " / " +
+                           vt_name.astype(str).fillna("")).str.strip(" /")
+    elif "전형유형" in detail.columns:
+        detail["지원전형"] = detail["전형유형"]
+    elif "전형명(대)" in detail.columns:
+        detail["지원전형"] = detail["전형명(대)"]
+    else:
+        detail["지원전형"] = ""
+
+    if "최저학력기준" in detail.columns:
+        detail["최저"] = detail["최저학력기준"].fillna("없음")
+    else:
+        detail["최저"] = "없음"
+
+    # 보여 줄 컬럼 (학년/반/번호/이름은 숨김)
+    cols_for_table = ["대표등급", "지역", "대학명", "모집단위", "지원전형", "최저"]
     cols_for_table = [c for c in cols_for_table if c in detail.columns]
+
     if not detail.empty:
         table_df = detail[cols_for_table].sort_values(["대표등급", "대학명", "모집단위"])
         st.dataframe(table_df, use_container_width=True, hide_index=True)
@@ -391,10 +412,7 @@ def view_recommend():
                 # diff = 내신(입력) - 합격평균내신
                 agg["내신차이(내-합)"] = my_grade - agg["합격평균내신"]
 
-                # 등급은 낮을수록 좋은 성적이므로 방향을 반대로 해석
-                # 상향(도전): 내신이 합격평균보다 0.5 등급 이상 나쁠 때
-                # 적정: ±0.5 이내
-                # 안전: 내신이 합격평균보다 0.5 등급 이상 좋을 때
+                # 상향/적정/안전 구분
                 def label_row(d):
                     diff = d["내신차이(내-합)"]  # 양수: 내가 더 나쁨, 음수: 내가 더 좋음
                     if diff > 0.5:
@@ -405,12 +423,20 @@ def view_recommend():
 
                 agg["추천구분"] = agg.apply(label_row, axis=1)
 
-                # 각 구분별로 2개씩 추천
                 safe = agg[agg["추천구분"] == "안전"].sort_values("내신차이(내-합)").head(2)
-                mid = agg[agg["추천구분"] == "적정"].iloc[
-                    (agg[agg["추천구분"] == "적정"]["내신차이(내-합)"].abs()).sort_values().index
-                ].head(2) if (agg["추천구분"] == "적정").any() else agg[agg["추천구분"] == "적정"]
-                risk = agg[agg["추천구분"] == "상향(도전)"].sort_values("내신차이(내-합)").head(2)
+
+                mid_candidates = agg[agg["추천구분"] == "적정"].copy()
+                if not mid_candidates.empty:
+                    mid_candidates = mid_candidates.sort_values(
+                        "내신차이(내-합)", key=lambda s: s.abs()
+                    )
+                    mid = mid_candidates.head(2)
+                else:
+                    mid = mid_candidates
+
+                risk = agg[agg["추천구분"] == "상향(도전)"].sort_values(
+                    "내신차이(내-합)", ascending=False
+                ).head(2)
 
                 rec = pd.concat([safe, mid, risk], ignore_index=True)
 
@@ -443,10 +469,6 @@ def view_recommend():
                     dfj["정시평균백분위"] = dfj[JEONG_SCORE_COL]
                     dfj["백분위차이(내-합)"] = mock_percentile - dfj["정시평균백분위"]
 
-                    # 백분위는 높을수록 좋은 성적
-                    # 상향(도전): 합격평균이 입력값보다 5p 이상 높을 때
-                    # 적정: ±5p 이내
-                    # 안전: 입력값이 합격평균보다 5p 이상 높을 때
                     def label_j(row):
                         diff = row["백분위차이(내-합)"]  # 양수: 내가 더 좋음, 음수: 내가 더 나쁨
                         if diff > 5:
@@ -457,15 +479,22 @@ def view_recommend():
 
                     dfj["추천구분"] = dfj.apply(label_j, axis=1)
 
-                    safe = dfj[dfj["추천구분"] == "안전"].sort_values("백분위차이(내-합)").head(2)
-                    mid_candidates = dfj[dfj["추천구분"] == "적정"]
+                    safe = dfj[dfj["추천구분"] == "안전"].sort_values(
+                        "백분위차이(내-합)"
+                    ).head(2)
+
+                    mid_candidates = dfj[dfj["추천구분"] == "적정"].copy()
                     if not mid_candidates.empty:
-                        mid = mid_candidates.iloc[
-                            mid_candidates["백분위차이(내-합)"].abs().sort_values().index
-                        ].head(2)
+                        mid_candidates = mid_candidates.sort_values(
+                            "백분위차이(내-합)", key=lambda s: s.abs()
+                        )
+                        mid = mid_candidates.head(2)
                     else:
                         mid = mid_candidates
-                    risk = dfj[dfj["추천구분"] == "상향(도전)"].sort_values("백분위차이(내-합)", ascending=False).head(2)
+
+                    risk = dfj[dfj["추천구분"] == "상향(도전)"].sort_values(
+                        "백분위차이(내-합)", ascending=False
+                    ).head(2)
 
                     recj = pd.concat([safe, mid, risk], ignore_index=True)
 
