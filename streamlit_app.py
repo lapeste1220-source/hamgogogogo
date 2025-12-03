@@ -535,7 +535,7 @@ def view_recommend():
                 if target_major:
                     agg = agg[agg["모집단위"].astype(str).str.contains(target_major)]
 
-                rec = pick_recommendations(agg, "추천구분", "내신차이(합-입)", top_n=2)
+                rec = pick_recommendations(agg, "추천구분", "내신차이(합-입)", top_n=3)
 
                 cols = ["추천구분"] + [c for c in ["대학명", "모집단위", "전형유형"] if c in rec.columns] + [
                     "합격평균내신",
@@ -741,4 +741,5 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
