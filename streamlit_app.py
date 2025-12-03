@@ -50,7 +50,6 @@ def load_multi_year_suji():
             df["입시연도"] = year
             frames.append(df)
         except Exception as e:
-            # 문제가 있는 파일은 콘솔에만 찍고 건너뜀
             print("SUJI 로딩 오류:", path.name, e)
 
     if not frames:
@@ -80,7 +79,6 @@ suji_df, susi_df, jeong_df, choe_df = load_data()
 
 # ---------------- 어디가 수시/정시 보조 테이블 ----------------
 if susi_df is not None:
-    # 수시 평균 내신 컬럼 추론 (있으면 사용, 없으면 추천에 활용하지 않음)
     grade_candidates = [
         c for c in susi_df.columns
         if any(k in c for k in ["평균", "평균등급", "내신", "등급"])
@@ -108,7 +106,6 @@ if jeong_df is not None:
 SUJI_HAS_DATA = suji_df is not None and not suji_df.empty
 
 if SUJI_HAS_DATA:
-    # 대표 등급 컬럼 찾기
     grade_cols = [c for c in suji_df.columns if "등급" in c and not any(
         x in c for x in ["한국사", "탐구", "제2외"]
     )]
@@ -169,7 +166,6 @@ def get_student_inputs():
     with row2[2]:
         g_hist = st.number_input("한국사 등급", 0.0, 9.0, 0.0, 1.0)
 
-    # 정시용 백분위 (직접 입력이 있으면 우선, 없으면 등급으로 대략 추정)
     if mock_input > 0:
         mock_percentile = mock_input
     else:
@@ -254,7 +250,6 @@ def view_grade_analysis():
 
     df = suji_df.copy()
 
-    # 기본 필터 값
     min_g = float(df["대표등급"].min()) if df["대표등급"].notna().any() else 1.0
     max_g = float(df["대표등급"].max()) if df["대표등급"].notna().any() else 6.0
 
@@ -277,7 +272,6 @@ def view_grade_analysis():
     with col5:
         major = st.text_input("학과(모집단위) 키워드", "")
 
-    # 필터 적용
     filtered = df.copy()
     filtered = filtered[
         (filtered["대표등급"] >= grade_min) & (filtered["대표등급"] <= grade_max)
@@ -293,7 +287,6 @@ def view_grade_analysis():
 
     admit_only = filtered[filtered["합격"]]
 
-    # --------- 합격자 지역 분포 ----------
     st.subheader("합격자 지역 분포")
     if admit_only.empty:
         st.info("선택한 조건에 해당하는 합격 데이터가 없습니다.")
@@ -325,7 +318,6 @@ def view_grade_analysis():
         st.altair_chart(chart, use_container_width=True)
         st.markdown(f"**가장 많은 지역: {top_region} (합격 {top_count}명)**")
 
-    # --------- 합격 전형 분포 (원형 차트) ----------
     st.subheader("합격 전형 분포")
     if admit_only.empty:
         st.info("선택한 조건에 해당하는 합격 데이터가 없습니다.")
@@ -355,7 +347,6 @@ def view_grade_analysis():
         )
         st.altair_chart(pie, use_container_width=True)
 
-    # --------- 상세 표 ----------
     st.markdown("---")
     st.markdown("#### 필터 조건에 따른 상세 합격 학과 목록 (함창고 입결)")
 
@@ -371,7 +362,6 @@ def view_grade_analysis():
     else:
         detail["이름마스킹"] = ""
 
-    # 지원 전형 + 최저
     vt_src = None
     for cand in ["전형유형", "전형명(대)", "전형명"]:
         if cand in detail.columns:
@@ -412,11 +402,12 @@ def pick_recommendations(df, label_col, diff_col, top_n=2):
         sub = df[df[label_col] == label].copy()
         if sub.empty:
             continue
-        sub = sub.iloc[(sub[diff_col].abs()).sort_values().index]
-        parts.append(sub.head(top_n))
+        order = sub[diff_col].abs().argsort()
+        sub = sub.iloc[order].head(top_n)
+        parts.append(sub)
     if parts:
         return pd.concat(parts, ignore_index=True)
-    return df  # 혹시 전부 라벨이 비어 있으면 전체 반환
+    return df
 
 
 def view_recommend():
@@ -426,7 +417,6 @@ def view_recommend():
 
     tab_su, tab_je, tab_jg = st.tabs(["수시 추천", "정시 추천", "학생부종합 자가진단"])
 
-    # ---- 수시 추천 : 함창고 입결 기반 ----
     with tab_su:
         st.subheader("수시 추천 대학 (함창고 합격 내신 기준)")
 
@@ -477,7 +467,6 @@ def view_recommend():
                 else:
                     st.info("추천할 만한 데이터를 찾지 못했습니다.")
 
-    # ---- 정시 추천 : 어디가 정시 입결 기반 ----
     with tab_je:
         st.subheader("정시 추천 대학 (모의고사 백분위 기준)")
 
@@ -512,7 +501,6 @@ def view_recommend():
 
                     recj = pick_recommendations(dfj, "추천구분", "백분위차이(입력-합격)", top_n=2)
 
-                    # 같은 대학/모집단위의 수시 교과 평균내신(있으면) 붙이기
                     if SU_DEPT_AVG is not None and {"대학명", "모집단위"}.issubset(recj.columns):
                         recj = recj.merge(
                             SU_DEPT_AVG,
@@ -527,18 +515,12 @@ def view_recommend():
 
                     st.dataframe(recj[colsj], use_container_width=True, hide_index=True)
 
-    # ---- 학생부종합 자가진단 (탭 3) ----
     with tab_jg:
         render_jagajin_inside_tab()
 
 
 # ---------------- 최저 기준으로 대학 찾기 ----------------
 def parse_minimum_rule(rule_text, grades):
-    """
-    rule_text: 최저학력기준 내용 (자연어)
-    grades: dict with keys ['국어','수학','영어','탐1','탐2','한국사'], value: 등급 (float, 1~9, 0은 미응시)
-    반환값: True(충족 가능) / False(불충족 또는 해석 불가)
-    """
     if not rule_text or not isinstance(rule_text, str):
         return False
 
@@ -547,13 +529,11 @@ def parse_minimum_rule(rule_text, grades):
     if not nums:
         return False
 
-    # 각 n등급 이내
     m_each = re.search(r"(\d)등급이내", text)
     if m_each:
         limit = int(m_each.group(1))
         return all(g <= limit for g in nums)
 
-    # n개 영역 합 x이내
     m_sum = re.search(r"(?:중)?(\d)개영역?합(\d+)이내", text)
     if m_sum:
         n = int(m_sum.group(1))
@@ -563,13 +543,11 @@ def parse_minimum_rule(rule_text, grades):
             return False
         return sum(nums_sorted[:n]) <= s_limit
 
-    # "2개영역각1등급" 등 간단 형태
     m_each2 = re.search(r"각(\d)등급", text)
     if m_each2:
         limit = int(m_each2.group(1))
         return all(g <= limit for g in nums)
 
-    # 해석 실패시 보수적으로 False
     return False
 
 
@@ -639,7 +617,6 @@ def view_choejeo():
             st.info("입력한 조건에 맞는 최저 기준 대학을 찾지 못했습니다. (해석 불가 조건은 제외되었습니다.)")
             return
 
-        # 어디가 수시 평균 내신 붙이기 (있을 때만)
         if SU_DEPT_AVG is not None and {"대학명", "모집단위명"}.issubset(df_ok.columns):
             df_ok = df_ok.merge(SU_DEPT_AVG, how="left", on=["대학명", "모집단위명"])
 
