@@ -473,7 +473,7 @@ def view_grade_analysis():
         "모집단위",
         "지원전형",
         "세부유형",
-            # --- 세부유형 필터 추가 ---
+    # --- 세부유형 필터 추가 ---
     if "세부유형" in detail.columns:
         type_options = sorted(detail["세부유형"].dropna().unique())
         selected_types = st.multiselect(
@@ -783,6 +783,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
 
 
