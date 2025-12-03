@@ -453,10 +453,10 @@ def view_grade_analysis():
 
 
 # ---------------- 추천 공통 유틸 ----------------
-def pick_recommendations(df, label_col, diff_col, top_n=2):
+def pick_recommendations(df, label_col, diff_col, top_n=3):
     results = []
 
-    safe = df[df[label_col] == "안전"]
+    safe = df[df[label_col] == "상향(도전)"]
     if not safe.empty:
         results.append(safe.nsmallest(top_n, diff_col))
 
@@ -465,7 +465,7 @@ def pick_recommendations(df, label_col, diff_col, top_n=2):
         mid = mid.loc[mid[diff_col].abs().sort_values().index].head(top_n)
         results.append(mid)
 
-    risk = df[df[label_col] == "상향(도전)"]
+    risk = df[df[label_col] == "안전"]
     if not risk.empty:
         results.append(risk.nlargest(top_n, diff_col))
 
@@ -585,7 +585,7 @@ def view_recommend():
                     if target_major:
                         dfj = dfj[dfj["모집단위"].astype(str).str.contains(target_major)]
 
-                    recj = pick_recommendations(dfj, "추천구분", "백분위차이(합-입)", top_n=2)
+                    recj = pick_recommendations(dfj, "추천구분", "백분위차이(합-입)", top_n=3)
 
                     if SU_DEPT_AVG is not None and {"대학명", "모집단위"}.issubset(recj.columns):
                         recj = recj.merge(
@@ -741,3 +741,4 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
