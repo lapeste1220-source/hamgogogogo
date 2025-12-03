@@ -479,10 +479,9 @@ def view_grade_analysis():
         selected_types = st.multiselect(
             "세부유형 필터",
             options=type_options,
-            default=type_options  # 기본 전체 선택
+            default=type_options
         )
 
-        # 필터 적용
         detail = detail[detail["세부유형"].isin(selected_types)]
 
         "최저",
@@ -783,6 +782,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
 
 
