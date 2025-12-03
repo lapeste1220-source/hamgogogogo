@@ -529,7 +529,7 @@ def view_recommend():
                 def label_row(d):
                     diff = d["내신차이(합-입)"]
                     if diff > 0.3:
-                        return "안전전"
+                        return "안전"
                     if diff < -0.3:
                         return "상향(도전)"
                     return "적정"
@@ -754,4 +754,5 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
