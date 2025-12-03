@@ -130,13 +130,28 @@ if SUJI_HAS_DATA:
 
     suji_df["등급대"] = suji_df["대표등급"].apply(band)
 
-    def decide_admit(row):
-        for col in ["등록여부", "최종단계", "불합격사유"]:
-            if col in row.index:
-                val = str(row[col])
-                if any(k in val for k in ["등록", "합격", "최종합격"]):
-                    return True
+def decide_admit(row):
+    # 문자열로 안전하게 꺼내기
+    reg = str(row.get("등록여부", ""))
+    final = str(row.get("최종단계", ""))
+    reason = str(row.get("불합격사유", ""))
+
+    # 1) 먼저 '불합격/미등록/탈락/포기/최저미충족' 등 부정어가 있으면 무조건 False
+    negative_keywords = ["불합격", "미등록", "탈락", "포기", "최저미충족", "최저미달"]
+    if any(neg in reason for neg in negative_keywords):
         return False
+
+    # 2) 그 다음 '등록여부'나 '최종단계'에 합격/등록이 명시되어 있으면 True
+    positive_keywords_reg = ["등록", "합격"]        # 등록여부 쪽
+    positive_keywords_final = ["합격", "최종합격", "추가합격", "추합"]
+
+    if any(pos in reg for pos in positive_keywords_reg):
+        return True
+    if any(pos in final for pos in positive_keywords_final):
+        return True
+
+    # 3) 그 외에는 보수적으로 False 처리
+    return False
 
     suji_df["합격"] = suji_df.apply(decide_admit, axis=1)
 
@@ -712,3 +727,4 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
