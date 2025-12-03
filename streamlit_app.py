@@ -430,61 +430,55 @@ def view_grade_analysis():
                     .properties(height=300)
                 )
                 st.altair_chart(bar, use_container_width=True)
+                
     # --------- 상세 표 ----------
-    st.markdown("---")
-    st.markdown("#### 필터 조건에 따른 상세 합격 학과 목록 (함창고 입결)")
+st.markdown("---")
+st.markdown("#### 필터 조건에 따른 상세 합격 학과 목록 (함창고 입결)")
 
-    detail = base[base["합격"]].copy()
-    if detail.empty:
-        st.info("조건에 맞는 합격 학과가 없습니다.")
-        return
+detail = base[base["합격"]].copy()
+if detail.empty:
+    st.info("조건에 맞는 합격 학과가 없습니다.")
+    return
 
-    if "이름" in detail.columns:
-        detail["이름마스킹"] = detail["이름"].astype(str).str[0] + "OO"
-    else:
-        detail["이름마스킹"] = ""
+# 이름 마스킹
+if "이름" in detail.columns:
+    detail["이름마스킹"] = detail["이름"].astype(str).str[0] + "OO"
+else:
+    detail["이름마스킹"] = ""
 
-    if "전형유형" in detail.columns:
-        detail["지원전형"] = detail["전형유형"]
-    else:
-        detail["지원전형"] = detail.get("전형명(대)", "")
+# 지원전형
+if "전형유형" in detail.columns:
+    detail["지원전형"] = detail["전형유형"]
+else:
+    detail["지원전형"] = detail.get("전형명(대)", "")
 
-    possible_cols = [c for c in detail.columns if "세부" in c or "전형" in c]
+# ★ 핵심 수정 — CSV에 존재하는 '세부유형' 컬럼을 그대로 사용
+detail["세부유형"] = detail.get("세부유형", "")
 
-    selected_col = None
-    for col in possible_cols:
-        if "세부" in col:
-           selected_col = col
-           break
-    
-    if "전형세부유형" in detail.columns:
-        detail["세부유형"] = detail["전형세부유형"]
-    else:
-        detail["세부유형"] = ""
-    
-    min_cols = [c for c in detail.columns if "최저" in c]
-    if min_cols:
-        mc = min_cols[0]
-        detail["최저"] = detail[mc].fillna("없음").replace("", "없음")
-    else:
-        detail["최저"] = "없음"
+# 최저 컬럼 처리
+min_cols = [c for c in detail.columns if "최저" in c]
+if min_cols:
+    mc = min_cols[0]
+    detail["최저"] = detail[mc].fillna("없음").replace("", "없음")
+else:
+    detail["최저"] = "없음"
 
-    cols_for_table = [
-        "입시연도",
-        "이름마스킹",
-        "대표등급",
-        "지역",
-        "대학명",
-        "모집단위",
-        "지원전형",
-        "세부유형",
-        "최저",
-    ]
-    cols_for_table = [c for c in cols_for_table if c in detail.columns]
+# 표 구성
+cols_for_table = [
+    "입시연도",
+    "이름마스킹",
+    "대표등급",
+    "지역",
+    "대학명",
+    "모집단위",
+    "지원전형",
+    "세부유형",   # 여기에 값이 제대로 채워짐
+    "최저",
+]
+cols_for_table = [c for c in cols_for_table if c in detail.columns]
 
-    table_df = detail[cols_for_table].sort_values(["입시연도", "대표등급", "대학명", "모집단위"])
-    st.dataframe(table_df, use_container_width=True, hide_index=True)
-
+table_df = detail[cols_for_table].sort_values(["입시연도", "대표등급", "대학명", "모집단위"])
+st.dataframe(table_df, use_container_width=True, hide_index=True)
 
 # ---------------- 추천 공통 유틸 ----------------
 def pick_recommendations(df, label_col, diff_col, top_n=3):
@@ -775,6 +769,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
 
 
