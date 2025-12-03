@@ -452,8 +452,18 @@ def view_grade_analysis():
     else:
         detail["지원전형"] = detail.get("전형명(대)", "")
 
-    # ★ 핵심: CSV의 '세부유형' 컬럼 적용
+    # 세부유형 (CSV 그대로 사용)
     detail["세부유형"] = detail.get("세부유형", "")
+
+    # --- 세부유형 필터 추가 ---
+    if "세부유형" in detail.columns:
+        type_options = sorted(detail["세부유형"].dropna().unique())
+        selected_types = st.multiselect(
+            "세부유형 필터",
+            options=type_options,
+            default=type_options
+        )
+        detail = detail[detail["세부유형"].isin(selected_types)]
 
     # 최저 정보
     min_cols = [c for c in detail.columns if "최저" in c]
@@ -473,17 +483,6 @@ def view_grade_analysis():
         "모집단위",
         "지원전형",
         "세부유형",
-    # --- 세부유형 필터 추가 ---
-    if "세부유형" in detail.columns:
-        type_options = sorted(detail["세부유형"].dropna().unique())
-        selected_types = st.multiselect(
-            "세부유형 필터",
-            options=type_options,
-            default=type_options
-        )
-
-        detail = detail[detail["세부유형"].isin(selected_types)]
-
         "최저",
     ]
     cols_for_table = [c for c in cols_for_table if c in detail.columns]
@@ -492,6 +491,7 @@ def view_grade_analysis():
         ["입시연도", "대표등급", "대학명", "모집단위"]
     )
     st.dataframe(table_df, use_container_width=True, hide_index=True)
+
     
 # ---------------- 추천 공통 유틸 ----------------
 def pick_recommendations(df, label_col, diff_col, top_n=3):
@@ -782,6 +782,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
 
 
