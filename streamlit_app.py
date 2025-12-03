@@ -1,3 +1,23 @@
+# ---- 보안: 비밀번호 확인 ----
+import streamlit as st
+
+PASSWORD = "hamchang123"   # 원하는 비밀번호로 변경
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔒 함창고 수시·정시 검색기 보안 접속")
+    pwd = st.text_input("비밀번호를 입력하세요:", type="password")
+
+    if st.button("접속"):
+        if pwd == PASSWORD:
+            st.session_state.authenticated = True
+            st.experimental_rerun()
+        else:
+            st.error("비밀번호가 틀렸습니다.")
+    st.stop()
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -741,5 +761,6 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
 
