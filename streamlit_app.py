@@ -449,6 +449,11 @@ def view_grade_analysis():
     else:
         detail["지원전형"] = detail.get("전형명(대)", "")
 
+    if "전형세부유형" in detail.columns:
+        detail["세부유형"] = detail["전형세부유형"]
+    else:
+        detail["세부유형"] = ""
+    
     min_cols = [c for c in detail.columns if "최저" in c]
     if min_cols:
         mc = min_cols[0]
@@ -464,6 +469,7 @@ def view_grade_analysis():
         "대학명",
         "모집단위",
         "지원전형",
+        "세부유형",
         "최저",
     ]
     cols_for_table = [c for c in cols_for_table if c in detail.columns]
@@ -761,6 +767,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
 
 
