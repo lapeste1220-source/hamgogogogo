@@ -431,10 +431,11 @@ def view_grade_analysis():
                 )
                 st.altair_chart(bar, use_container_width=True)
                 
-    # --------- 상세 표 ----------
+       # --------- 상세 표 ----------
     st.markdown("---")
     st.markdown("#### 필터 조건에 따른 상세 합격 학과 목록 (함창고 입결)")
 
+    # 합격 데이터만 추출
     detail = base[base["합격"]].copy()
     if detail.empty:
         st.info("조건에 맞는 합격 학과가 없습니다.")
@@ -446,7 +447,7 @@ def view_grade_analysis():
     else:
         detail["이름마스킹"] = ""
 
-    # 지원전형
+    # 지원전형 (전형유형 또는 전형명(대))
     if "전형유형" in detail.columns:
         detail["지원전형"] = detail["전형유형"]
     else:
@@ -455,17 +456,22 @@ def view_grade_analysis():
     # 세부유형 (CSV 그대로 사용)
     detail["세부유형"] = detail.get("세부유형", "")
 
-    # --- 세부유형 필터 추가 ---
-    if "세부유형" in detail.columns:
-        type_options = sorted(detail["세부유형"].dropna().unique())
-        selected_types = st.multiselect(
-            "세부유형 필터",
-            options=type_options,
-            default=type_options
-        )
-        detail = detail[detail["세부유형"].isin(selected_types)]
+    # --- 세부유형 검색 필터 (검색 기반 AND 필터링) ---
+    keyword_input = st.text_input(
+        "세부유형 검색 (예: 농어촌 기회)", 
+        value=""
+    )
 
-    # 최저 정보
+    if keyword_input.strip():
+        keywords = [k.strip() for k in re.split(r"[ ,]+", keyword_input) if k.strip()]
+
+        def match_keywords(text):
+            text = str(text)
+            return all(k in text for k in keywords)
+
+        detail = detail[detail["세부유형"].apply(match_keywords)]
+
+    # 최저 정보 처리
     min_cols = [c for c in detail.columns if "최저" in c]
     if min_cols:
         mc = min_cols[0]
@@ -473,7 +479,7 @@ def view_grade_analysis():
     else:
         detail["최저"] = "없음"
 
-    # 표 컬럼
+    # 표에 표시할 컬럼
     cols_for_table = [
         "입시연도",
         "이름마스킹",
@@ -487,6 +493,7 @@ def view_grade_analysis():
     ]
     cols_for_table = [c for c in cols_for_table if c in detail.columns]
 
+    # 정렬 및 출력
     table_df = detail[cols_for_table].sort_values(
         ["입시연도", "대표등급", "대학명", "모집단위"]
     )
@@ -782,6 +789,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
 
 
