@@ -16,19 +16,19 @@ st.caption("함창고 입결 + 2025 어디가 수시·정시·최저 데이터�
 
 DATA_DIR = Path(".")
 
-# ---- 파일 경로 (연도별 수시진학관리 여러 개) ----
-SUJI_FILES = [
-    ("2025", DATA_DIR / "수시진학관리(2025년2월4일).csv"),
-    ("2024", DATA_DIR / "수시진학관리(2024년2월20일).csv"),
-]
+# 함창고 수시진학관리: 2025 + 2024 파일을 합쳐 사용
+SUJI_2025_FILE = DATA_DIR / "수시진학관리(2025년2월4일).csv"
+SUJI_2024_FILE = DATA_DIR / "수시진학관리(2024년2월20일).csv"
+
+# 어디가 수시/정시/최저
 SUSI_FILE = DATA_DIR / "2025수시입결.csv"
 JEONG_FILE = DATA_DIR / "2025정시입결.csv"
 CHOEJEO_FILE = DATA_DIR / "2025최저모음.csv"
 
-# 전역에서 사용할 컬럼 정보
-SUSI_GRADE_COL = None        # 어디가 수시 평균 내신 컬럼명
+# 전역에서 사용할 변수
+SUSI_GRADE_COL = None        # 어디가 수시 평균 내신(등급) 컬럼명
 SU_DEPT_AVG = None           # 대학/모집단위별 수시 평균 내신
-JEONG_SCORE_COL = None       # 정시 평균 백분위 컬럼명
+JEONG_SCORE_COL = None       # 정시 반영영역 평균백분위 컬럼명
 
 # ---------------- 공통 유틸 ----------------
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -39,17 +39,24 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_data
 def load_data():
-    # 수시진학관리 여러 연도 합치기
-    suji_frames = []
-    for year, path in SUJI_FILES:
-        if path.exists():
-            tmp = pd.read_csv(path, encoding="utf-8")
-            tmp = normalize_columns(tmp)
-            tmp["입시연도"] = int(year)
-            suji_frames.append(tmp)
+    # 1) 함창고 수시진학관리 (연도별 병합)
+    suji_list = []
 
-    suji = pd.concat(suji_frames, ignore_index=True) if suji_frames else None
+    if SUJI_2025_FILE.exists():
+        df25 = pd.read_csv(SUJI_2025_FILE, encoding="utf-8")
+        df25 = normalize_columns(df25)
+        df25["입시연도"] = 2025
+        suji_list.append(df25)
 
+    if SUJI_2024_FILE.exists():
+        df24 = pd.read_csv(SUJI_2024_FILE, encoding="utf-8")
+        df24 = normalize_columns(df24)
+        df24["입시연도"] = 2024
+        suji_list.append(df24)
+
+    suji = pd.concat(suji_list, ignore_index=True) if suji_list else None
+
+    # 2) 어디가 수시/정시/최저
     susi = jeong = choe = None
     if SUSI_FILE.exists():
         susi = pd.read_csv(SUSI_FILE, encoding="utf-8")
@@ -68,6 +75,7 @@ suji_df, susi_df, jeong_df, choe_df = load_data()
 
 # ---------------- 어디가 수시/정시 보조 테이블 ----------------
 if susi_df is not None:
+    # 수시 평균 내신 컬럼 추론
     grade_candidates = [
         c for c in susi_df.columns
         if any(k in c for k in ["평균", "평균등급", "내신", "등급"])
@@ -76,6 +84,7 @@ if susi_df is not None:
 
     if SUSI_GRADE_COL is not None and SUSI_GRADE_COL in susi_df.columns:
         su_for_avg = susi_df.copy()
+        # 가능하면 교과 전형만 사용
         if "전형세부유형" in su_for_avg.columns:
             mask = su_for_avg["전형세부유형"].astype(str).str.contains("교과")
             su_for_avg = su_for_avg[mask]
@@ -93,6 +102,32 @@ if jeong_df is not None:
 
 # ---------------- 함창고 수시진학 데이터 가공 ----------------
 SUJI_HAS_DATA = suji_df is not None and not suji_df.empty
+
+def decide_admit(row):
+    """
+    합격 여부 판단:
+    1) 불합격/미등록/최저미충족 등 부정 키워드가 '불합격사유'에 있으면 무조건 False
+    2) 그 외에 등록여부/최종단계에 합격/등록이 있으면 True
+    3) 나머지는 False
+    """
+    reg = str(row.get("등록여부", ""))
+    final = str(row.get("최종단계", ""))
+    reason = str(row.get("불합격사유", ""))
+
+    negative_keywords = ["불합격", "미등록", "탈락", "포기", "최저미충족", "최저미달"]
+    if any(neg in reason for neg in negative_keywords):
+        return False
+
+    positive_keywords_reg = ["등록", "합격"]
+    positive_keywords_final = ["합격", "최종합격", "추가합격", "추합"]
+
+    if any(pos in reg for pos in positive_keywords_reg):
+        return True
+    if any(pos in final for pos in positive_keywords_final):
+        return True
+
+    return False
+
 
 if SUJI_HAS_DATA:
     # 대표 등급 컬럼 찾기
@@ -113,46 +148,7 @@ if SUJI_HAS_DATA:
     else:
         suji_df["대표등급"] = np.nan
 
-    def band(x):
-        if pd.isna(x):
-            return "등급정보없음"
-        if x < 1.5:
-            return "1등급대"
-        if x < 2.5:
-            return "2등급대"
-        if x < 3.5:
-            return "3등급대"
-        if x < 4.5:
-            return "4등급대"
-        if x < 5.5:
-            return "5등급대"
-        return "6등급대이하"
-
-    suji_df["등급대"] = suji_df["대표등급"].apply(band)
-
-def decide_admit(row):
-    # 문자열로 안전하게 꺼내기
-    reg = str(row.get("등록여부", ""))
-    final = str(row.get("최종단계", ""))
-    reason = str(row.get("불합격사유", ""))
-
-    # 1) 먼저 '불합격/미등록/탈락/포기/최저미충족' 등 부정어가 있으면 무조건 False
-    negative_keywords = ["불합격", "미등록", "탈락", "포기", "최저미충족", "최저미달"]
-    if any(neg in reason for neg in negative_keywords):
-        return False
-
-    # 2) 그 다음 '등록여부'나 '최종단계'에 합격/등록이 명시되어 있으면 True
-    positive_keywords_reg = ["등록", "합격"]        # 등록여부 쪽
-    positive_keywords_final = ["합격", "최종합격", "추가합격", "추합"]
-
-    if any(pos in reg for pos in positive_keywords_reg):
-        return True
-    if any(pos in final for pos in positive_keywords_final):
-        return True
-
-    # 3) 그 외에는 보수적으로 False 처리
-    return False
-
+    # 합격 여부
     suji_df["합격"] = suji_df.apply(decide_admit, axis=1)
 
 # ---------------- 학생 입력 유틸 ----------------
@@ -162,29 +158,36 @@ def get_student_inputs():
     with col1:
         my_grade = st.number_input(
             "내신 대표 등급(전교과 또는 국수영 평균)",
-            min_value=1.0, max_value=9.0, step=0.1, value=3.0,
+            min_value=1.0, max_value=9.0, step=1.0, value=3.0,
         )
     with col2:
-        mock_percentile = st.number_input(
-            "최근 모의고사 백분위 평균(0이면 미입력)",
+        mock_percent_input = st.number_input(
+            "최근 모의고사 백분위 평균 (없으면 0)",
             min_value=0.0, max_value=100.0, step=1.0, value=0.0,
         )
 
-    st.write("최근 모의고사 등급 입력 (없으면 0으로 두세요)")
-    row1 = st.columns(3)
-    row2 = st.columns(3)
-    with row1[0]:
-        st.number_input("국어 등급", 0.0, 9.0, 0.0, 1.0, key="g_kor")
-    with row1[1]:
-        st.number_input("영어 등급", 0.0, 9.0, 0.0, 1.0, key="g_eng")
-    with row1[2]:
-        st.number_input("수학 등급", 0.0, 9.0, 0.0, 1.0, key="g_math")
-    with row2[0]:
-        st.number_input("탐구1 등급", 0.0, 9.0, 0.0, 1.0, key="g_t1")
-    with row2[1]:
-        st.number_input("탐구2 등급", 0.0, 9.0, 0.0, 1.0, key="g_t2")
-    with row2[2]:
-        st.number_input("한국사 등급", 0.0, 9.0, 0.0, 1.0, key="g_hist")
+    st.write("과목별 등급(선택 입력, 백분위 추정용)")
+
+    r1c1, r1c2, r2c1 = st.columns(3)
+    with r1c1:
+        g_kor = st.number_input("국어 등급", 0.0, 9.0, 0.0, 1.0)
+        g_eng = st.number_input("영어 등급", 0.0, 9.0, 0.0, 1.0)
+    with r1c2:
+        g_math = st.number_input("수학 등급", 0.0, 9.0, 0.0, 1.0)
+        g_t1 = st.number_input("탐구1 등급", 0.0, 9.0, 0.0, 1.0)
+    with r2c1:
+        g_t2 = st.number_input("탐구2 등급", 0.0, 9.0, 0.0, 1.0)
+        g_hist = st.number_input("한국사 등급", 0.0, 9.0, 0.0, 1.0)
+
+    # 과목 등급으로부터 백분위 추정 (백분위 평균 입력이 0일 때만 사용)
+    grade_list = [g for g in [g_kor, g_math, g_eng, g_t1, g_t2] if g > 0]
+    mock_percent_est = None
+    if grade_list:
+        mapping = {1: 96, 2: 89, 3: 77, 4: 62, 5: 47, 6: 32, 7: 20, 8: 11, 9: 4}
+        perc = [mapping.get(int(round(g)), 50) for g in grade_list]
+        mock_percent_est = float(np.mean(perc))
+
+    mock_percentile = mock_percent_input if mock_percent_input > 0 else mock_percent_est
 
     region_options = ["서울", "경기", "인천", "부산", "대구", "경북", "충북", "충남"]
     selected_regions = st.multiselect(
@@ -192,6 +195,7 @@ def get_student_inputs():
     )
 
     return my_grade, mock_percentile, selected_regions
+
 
 # ---------------- 학생부종합 자가진단 ----------------
 def render_jagajin_inside_tab():
@@ -247,24 +251,6 @@ def render_jagajin_inside_tab():
     with c2:
         st.bar_chart(df.iloc[half:].set_index("문항"))
 
-# ---------------- 공통 추천 선택 로직 ----------------
-def pick_recommendations(df, label_col, diff_col, top_n=2):
-    """추천구분(label_col)과 차이(diff_col)를 이용해
-    안전/적정/상향(도전)에서 각각 최대 top_n개씩 뽑는다.
-    """
-    order = ["안전", "적정", "상향(도전)"]
-    results = []
-    for lab in order:
-        sub = df[df[label_col] == lab].copy()
-        if sub.empty:
-            continue
-        sub["_absdiff"] = sub[diff_col].abs()
-        sub = sub.sort_values("_absdiff").head(top_n)
-        results.append(sub)
-    if not results:
-        return pd.DataFrame()
-    rec = pd.concat(results, ignore_index=True)
-    return rec.drop(columns=["_absdiff"])
 
 # ---------------- 뷰 1: 함창고 등급대 분석 ----------------
 def view_grade_analysis():
@@ -274,47 +260,56 @@ def view_grade_analysis():
         return
 
     df = suji_df.copy()
+    df = df.dropna(subset=["대표등급"])
 
-    # 필터 UI
-    row1 = st.columns(4)
-    with row1[0]:
-        valid = df["대표등급"].dropna()
-        if valid.empty:
-            st.error("대표등급 정보가 없습니다.")
-            return
-        g_min, g_max = float(valid.min()), float(valid.max())
+    # --- 필터 UI ---
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        min_g = float(np.floor(df["대표등급"].min()))
+        max_g = float(np.ceil(df["대표등급"].max()))
         grade_min, grade_max = st.slider(
             "대표등급 범위 선택",
-            min_value=round(g_min, 2),
-            max_value=round(g_max, 2),
-            value=(max(1.0, round(g_min, 2)), min(4.0, round(g_max, 2))),
-            step=0.1,
+            min_value=min_g,
+            max_value=max_g,
+            value=(min_g, max_g),
+            step=1.0,
         )
-    with row1[1]:
-        years = sorted(df["입시연도"].dropna().unique().tolist())
-        selected_years = st.multiselect("입시 연도", options=years, default=years)
-    with row1[2]:
+    with col2:
+        year_options = sorted(df["입시연도"].dropna().unique())
+        default_years = [year_options[-1]] if year_options else []
+        selected_years = st.multiselect("입시 연도", options=year_options, default=default_years)
+    with col3:
         region = st.multiselect("지역 선택", options=sorted(df["지역"].dropna().unique()))
-    with row1[3]:
+    with col4:
         univ = st.multiselect("대학 선택", options=sorted(df["대학명"].dropna().unique()))
 
-    major = st.text_input("학과(모집단위) 키워드", "")
+    major_keyword = st.text_input("학과(모집단위) 키워드", "")
 
-    # 필터 적용
-    filtered = df.copy()
-    filtered = filtered.dropna(subset=["대표등급"])
-    filtered = filtered[(filtered["대표등급"] >= grade_min) & (filtered["대표등급"] <= grade_max)]
-
+    # --- 필터 적용 ---
+    filtered = df[(df["대표등급"] >= grade_min) & (df["대표등급"] <= grade_max)]
     if selected_years:
         filtered = filtered[filtered["입시연도"].isin(selected_years)]
     if region:
         filtered = filtered[filtered["지역"].isin(region)]
     if univ:
         filtered = filtered[filtered["대학명"].isin(univ)]
-    if major:
-        filtered = filtered[filtered["모집단위"].astype(str).str.contains(major)]
+    if major_keyword:
+        filtered = filtered[filtered["모집단위"].astype(str).str.contains(major_keyword)]
 
-    admit_only = filtered[filtered["합격"]]
+    if filtered.empty:
+        st.info("선택한 조건에 해당하는 데이터가 없습니다.")
+        return
+
+    # 전형 분류 (교과/종합/농어촌/기타)
+    vt_col = "전형유형" if "전형유형" in filtered.columns else "전형명(대)"
+    base = filtered.assign(
+        전형분류=lambda d: d[vt_col]
+        .astype(str)
+        .str.extract("(교과|종합|농어촌)", expand=False)
+        .fillna("기타")
+    )
+
+    admit_only = base[base["합격"]]
 
     # --------- 합격자 지역 분포 ----------
     st.subheader("합격자 지역 분포")
@@ -349,31 +344,21 @@ def view_grade_analysis():
         st.altair_chart(chart, use_container_width=True)
         st.markdown(f"**가장 많은 지역: {top_region} (합격 {top_count}명)**")
 
-    # --------- 합격 전형 분포 + 최저 충족률 ----------
-    st.subheader("합격 전형 분포 & 최저 충족률(추정)")
-    col_l, col_r = st.columns(2)
+    # --------- 합격 전형 분포 & 최저 충족률 ----------
+    st.subheader("합격 전형 및 최저 충족률")
 
-    if admit_only.empty:
-        with col_l:
-            st.info("선택한 조건에 해당하는 합격 데이터가 없습니다.")
-        with col_r:
-            st.info("선택한 조건에 해당하는 최저 학력 기준 데이터가 없습니다.")
-    else:
-        vt_col = "전형유형" if "전형유형" in filtered.columns else "전형명(대)"
-        base = admit_only.assign(
-            전형분류=lambda d: d[vt_col]
-            .astype(str)
-            .str.extract("(교과|종합)", expand=False)
-            .fillna("기타")
-        )
+    col_left, col_right = st.columns(2)
 
-        vt_count = (
-            base.groupby("전형분류")
-            .size()
-            .reset_index(name="합격자수")
-        )
-
-        with col_l:
+    with col_left:
+        st.markdown("##### 합격 전형 분포")
+        if admit_only.empty:
+            st.info("합격 데이터가 없습니다.")
+        else:
+            vt_count = (
+                admit_only.groupby("전형분류")
+                .size()
+                .reset_index(name="합격자수")
+            )
             pie = (
                 alt.Chart(vt_count)
                 .mark_arc()
@@ -385,66 +370,77 @@ def view_grade_analysis():
             )
             st.altair_chart(pie, use_container_width=True)
 
-        # 최저 충족률: 최저 있는 전형에서의 합격 비율
-        with col_r:
-            if "최저학력기준" not in filtered.columns:
-                st.info("최저 학력 기준 정보가 없습니다.")
+    with col_right:
+        st.markdown("##### 최저 충족률 (최저가 있는 전형 기준)")
+        # 최저 관련 컬럼 찾기
+        min_cols = [c for c in base.columns if "최저" in c]
+        min_col = min_cols[0] if min_cols else None
+
+        if min_col is None:
+            st.info("최저학력 기준 정보가 없어 충족률을 계산할 수 없습니다.")
+        else:
+            # '없음', 공백, NaN 제외 → 최저가 실제로 있는 데이터만
+            cond_has_min = (
+                base[min_col].notna()
+                & (base[min_col].astype(str).str.strip() != "")
+                & (~base[min_col].astype(str).str.contains("없음"))
+            )
+            base_min = base[cond_has_min].copy()
+
+            if base_min.empty:
+                st.info("최저학력 기준이 설정된 전형이 없습니다.")
             else:
-                base_all = filtered.copy()
-                base_all["전형분류"] = base_all[vt_col].astype(str).str.extract(
-                    "(교과|종합)", expand=False
-                ).fillna("기타")
+                # 전형별로 '합격' 비율 (True=1, False=0)의 평균
+                min_stats = (
+                    base_min.groupby("전형분류")["합격"]
+                    .mean()
+                    .reset_index(name="최저충족률")
+                )
+                min_stats["최저충족률(%)"] = (min_stats["최저충족률"] * 100).round(1)
 
-                mask_min = base_all["최저학력기준"].astype(str).str.strip() != ""
-                mask_min &= ~base_all["최저학력기준"].astype(str).str.contains("없음")
-                min_df = base_all[mask_min]
-
-                if min_df.empty:
-                    st.info("선택한 조건에서 최저 기준이 있는 전형 데이터가 없습니다.")
-                else:
-                    rate = (
-                        min_df.groupby("전형분류")["합격"]
-                        .mean()
-                        .reset_index()
+                bar = (
+                    alt.Chart(min_stats)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("전형분류:O", axis=alt.Axis(labelAngle=0)),
+                        y=alt.Y("최저충족률(%):Q"),
+                        tooltip=["전형분류", "최저충족률(%)"],
                     )
-                    rate["최저충족률(%)"] = rate["합격"] * 100
+                    .properties(height=300)
+                )
+                st.altair_chart(bar, use_container_width=True)
 
-                    bar = (
-                        alt.Chart(rate)
-                        .mark_bar()
-                        .encode(
-                            x=alt.X("전형분류:O", axis=alt.Axis(labelAngle=0)),
-                            y=alt.Y("최저충족률(%):Q"),
-                            tooltip=["전형분류", "최저충족률(%)"],
-                        )
-                        .properties(height=300)
-                    )
-                    st.altair_chart(bar, use_container_width=True)
-
-    # --------- 상세 표 (우리 학교 입결) ----------
+    # --------- 상세 표 (합격 학과 목록, 개인정보 최소화) ----------
     st.markdown("---")
     st.markdown("#### 필터 조건에 따른 상세 합격 학과 목록 (함창고 입결)")
 
-    detail = admit_only.copy()
+    detail = base[base["합격"]].copy()
     if detail.empty:
         st.info("조건에 맞는 합격 학과가 없습니다.")
         return
 
-    # 지원전형 / 최저 컬럼 구성
+    # 이름 마스킹
+    if "이름" in detail.columns:
+        detail["이름마스킹"] = detail["이름"].astype(str).str[0] + "OO"
+    else:
+        detail["이름마스킹"] = ""
+
+    # 지원 전형, 최저 정보
     if "전형유형" in detail.columns:
         detail["지원전형"] = detail["전형유형"]
-    elif "전형명(대)" in detail.columns:
-        detail["지원전형"] = detail["전형명(대)"]
     else:
-        detail["지원전형"] = ""
+        detail["지원전형"] = detail.get("전형명(대)", "")
 
-    if "최저학력기준" in detail.columns:
-        detail["최저"] = detail["최저학력기준"].replace("", np.nan).fillna("없음")
+    min_cols = [c for c in detail.columns if "최저" in c]
+    if min_cols:
+        mc = min_cols[0]
+        detail["최저"] = detail[mc].fillna("없음").replace("", "없음")
     else:
         detail["최저"] = "없음"
 
     cols_for_table = [
         "입시연도",
+        "이름마스킹",
         "대표등급",
         "지역",
         "대학명",
@@ -454,10 +450,43 @@ def view_grade_analysis():
     ]
     cols_for_table = [c for c in cols_for_table if c in detail.columns]
 
-    table_df = detail[cols_for_table].sort_values(
-        ["입시연도", "대표등급", "대학명", "모집단위"]
-    )
+    table_df = detail[cols_for_table].sort_values(["입시연도", "대표등급", "대학명", "모집단위"])
     st.dataframe(table_df, use_container_width=True, hide_index=True)
+
+
+# ---------------- 추천 공통 유틸 ----------------
+def pick_recommendations(df, label_col, diff_col, top_n=2):
+    """추천구분(상향/적정/안전)에 따라 상위 N개씩 뽑는 보조 함수."""
+    results = []
+
+    # 안전: diff가 작을수록(=입력값보다 합격평균 훨씬 낮음 → 여유) 우선
+    safe = df[df[label_col] == "안전"]
+    if not safe.empty:
+        results.append(safe.nsmallest(top_n, diff_col))
+
+    # 적정: diff 절대값이 작은 순
+    mid = df[df[label_col] == "적정"].copy()
+    if not mid.empty:
+        mid = mid.loc[mid[diff_col].abs().sort_values().index].head(top_n)
+        results.append(mid)
+
+    # 상향(도전): diff가 큰 순 (합격평균이 입력값보다 높음)
+    risk = df[df[label_col] == "상향(도전)"]
+    if not risk.empty:
+        results.append(risk.nlargest(top_n, diff_col))
+
+    if not results:
+        return pd.DataFrame(columns=df.columns)
+
+    rec = pd.concat(results, ignore_index=True)
+
+    # 동일 대학/모집단위가 중복되면 한 번만
+    dedup_keys = [c for c in ["대학명", "모집단위"] if c in rec.columns]
+    if dedup_keys:
+        rec = rec.drop_duplicates(subset=dedup_keys, keep="first")
+
+    return rec
+
 
 # ---------------- 뷰 2: 수시·정시 추천 탐색기 ----------------
 def view_recommend():
@@ -479,11 +508,11 @@ def view_recommend():
         else:
             df = suji_df.copy()
             df = df[df["합격"]]
+            df = df.dropna(subset=["대표등급"])
 
             if "지역" in df.columns and regions:
                 df = df[df["지역"].isin(regions)]
 
-            df = df.dropna(subset=["대표등급"])
             if df.empty:
                 st.info("선택한 지역에서 합격 내신 데이터가 부족합니다.")
             else:
@@ -493,26 +522,26 @@ def view_recommend():
                     .mean()
                     .rename(columns={"대표등급": "합격평균내신"})
                 )
-                agg["내신차이(입력-합)"] = my_grade - agg["합격평균내신"]
 
-                # 추천구분: 상향/적정/안전
+                # diff = 합격평균 - 입력값  (양수: 상향, 음수: 안전)
+                agg["내신차이(합-입)"] = agg["합격평균내신"] - my_grade
+
                 def label_row(d):
-                    diff = d["내신차이(입력-합)"]
-                    if diff < -0.3:
+                    diff = d["내신차이(합-입)"]
+                    if diff > 0.3:
                         return "상향(도전)"
-                    if abs(diff) <= 0.3:
-                        return "적정"
-                    return "안전"
+                    if diff < -0.3:
+                        return "안전"
+                    return "적정"
 
                 agg["추천구분"] = agg.apply(label_row, axis=1)
 
-                rec = pick_recommendations(agg, "추천구분", "내신차이(입력-합)", top_n=2)
+                rec = pick_recommendations(agg, "추천구분", "내신차이(합-입)", top_n=2)
 
                 cols = ["추천구분"] + [c for c in ["대학명", "모집단위", "전형유형"] if c in rec.columns] + [
                     "합격평균내신",
-                    "내신차이(입력-합)",
+                    "내신차이(합-입)",
                 ]
-
                 if not rec.empty:
                     st.dataframe(rec[cols], use_container_width=True, hide_index=True)
                 else:
@@ -520,13 +549,13 @@ def view_recommend():
 
     # ---- 정시 추천 : 어디가 정시 입결 기반 ----
     with tab_je:
-        st.subheader("정시 추천 대학 (모의고사 백분위 평균 기준)")
+        st.subheader("정시 추천 대학 (모의고사 백분위 기준)")
 
         if jeong_df is None or JEONG_SCORE_COL is None:
             st.warning("어디가 정시 입결 데이터가 부족하여 정시 추천 계산을 할 수 없습니다.")
         else:
-            if mock_percentile <= 0:
-                st.info("정시 추천을 위해서는 최근 모의고사 백분위 평균을 입력해 주세요.")
+            if mock_percentile is None:
+                st.info("정시 추천을 위해서는 최근 모의고사 백분위 평균을 입력하거나 과목 등급을 일부 입력해 주세요.")
             else:
                 dfj = jeong_df.copy()
                 if "지역구분" in dfj.columns and regions:
@@ -539,25 +568,23 @@ def view_recommend():
                     st.warning("해당 지역에서 정시 입결 데이터가 없습니다.")
                 else:
                     dfj["정시평균백분위"] = dfj[JEONG_SCORE_COL]
-                    dfj["백분위차이(입력-합)"] = mock_percentile - dfj["정시평균백분위"]
+                    # diff = 합격평균 - 입력값 (양수: 상향, 음수: 안전)
+                    dfj["백분위차이(합-입)"] = dfj["정시평균백분위"] - mock_percentile
 
                     def label_j(row):
-                        d = row["백분위차이(입력-합)"]
-                        if d < -3:
+                        d = row["백분위차이(합-입)"]
+                        if d > 3:
                             return "상향(도전)"
-                        if abs(d) <= 3:
-                            return "적정"
-                        return "안전"
+                        if d < -3:
+                            return "안전"
+                        return "적정"
 
                     dfj["추천구분"] = dfj.apply(label_j, axis=1)
 
-                    recj = pick_recommendations(dfj, "추천구분", "백분위차이(입력-합)", top_n=2)
+                    recj = pick_recommendations(dfj, "추천구분", "백분위차이(합-입)", top_n=2)
 
                     # 같은 대학/모집단위의 수시 교과 평균내신(있으면) 붙이기
-                    if not recj.empty and SU_DEPT_AVG is not None and {
-                        "대학명",
-                        "모집단위",
-                    }.issubset(recj.columns):
+                    if SU_DEPT_AVG is not None and {"대학명", "모집단위"}.issubset(recj.columns):
                         recj = recj.merge(
                             SU_DEPT_AVG,
                             how="left",
@@ -565,18 +592,16 @@ def view_recommend():
                             right_on=["대학명", "모집단위명"],
                         )
 
-                    colsj = ["추천구분", "대학명", "전형명", "모집군", "모집단위", "정시평균백분위", "백분위차이(입력-합)"]
+                    colsj = ["추천구분", "대학명", "전형명", "모집군", "모집단위", "정시평균백분위", "백분위차이(합-입)"]
                     if "수시평균내신" in recj.columns:
                         colsj.append("수시평균내신")
 
-                    if not recj.empty:
-                        st.dataframe(recj[colsj], use_container_width=True, hide_index=True)
-                    else:
-                        st.info("추천할 만한 정시 데이터를 찾지 못했습니다.")
+                    st.dataframe(recj[colsj], use_container_width=True, hide_index=True)
 
-    # ---- 학생부종합 자가진단 (탭 3) ----
+    # ---- 학생부종합 자가진단 ----
     with tab_jg:
         render_jagajin_inside_tab()
+
 
 # ---------------- 최저 기준으로 대학 찾기 ----------------
 def parse_minimum_rule(rule_text, grades):
@@ -627,6 +652,7 @@ def view_choejeo():
         return
 
     st.markdown("### 1) 내 희망 최저 기준 입력")
+
     row1 = st.columns(3)
     with row1[0]:
         g_k = st.number_input("국어 최대 등급(0=미사용)", 0.0, 9.0, 0.0, 1.0, key="min_k")
@@ -701,6 +727,7 @@ def view_choejeo():
         cols = [c for c in cols if c in df_ok.columns]
         st.dataframe(df_ok[cols], use_container_width=True, hide_index=True)
 
+
 # ---------------- 사이드바 메뉴 ----------------
 with st.sidebar:
     st.markdown("### 메뉴 선택")
@@ -727,4 +754,3 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
-
