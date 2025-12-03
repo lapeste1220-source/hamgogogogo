@@ -13,7 +13,7 @@ if not st.session_state.authenticated:
     if st.button("접속"):
         if pwd == PASSWORD:
             st.session_state.authenticated = True
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("비밀번호가 틀렸습니다.")
     st.stop()
@@ -761,6 +761,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True,
 )
+
 
 
 
