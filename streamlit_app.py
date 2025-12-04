@@ -251,14 +251,14 @@ def get_student_inputs():
 
     k1, k2, k3 = st.columns(3)
     with k1:
-        g_kor = st.number_input("국어", 0.0, 9.0, 0.0)
-        g_eng = st.number_input("영어", 0.0, 9.0, 0.0)
+        g_kor = st.number_input("국어", min_value=0, max_value=9, step=1, value=0)
+        g_eng = st.number_input("영어", min_value=0, max_value=9, step=1, value=0)
     with k2:
-        g_math = st.number_input("수학", 0.0, 9.0, 0.0)
-        g_t1 = st.number_input("탐구1", 0.0, 9.0, 0.0)
+        g_math = st.number_input("수학", min_value=0, max_value=9, step=1, value=0)
+        g_t1 = st.number_input("탐구1", min_value=0, max_value=9, step=1, value=0)
     with k3:
-        g_t2 = st.number_input("탐구2", 0.0, 9.0, 0.0)
-        g_hist = st.number_input("한국사", 0.0, 9.0, 0.0)
+        g_t2 = st.number_input("탐구2", min_value=0, max_value=9, step=1, value=0)
+        g_hist = st.number_input("한국사", min_value=0, max_value=9, step=1, value=0)
 
     grades = [g for g in [g_kor, g_math, g_eng, g_t1, g_t2] if g > 0]
 
@@ -824,4 +824,5 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True
 )
+
 
