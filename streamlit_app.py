@@ -164,6 +164,25 @@ def load_data():
 
 suji_df, susi_df, jeong_df, choe_df = load_data()
 # =========================================
+#     ✔ 정시 백분위 컬럼 자동 탐색
+# =========================================
+
+JEONG_SCORE_COL = None
+
+if jeong_df is not None:
+    # 정시 CSV 컬럼명이 다양할 수 있어 유연한 탐색 적용
+    cand = [
+        c for c in jeong_df.columns
+        if any(k in c.replace(" ", "") for k in ["백분위", "평균백분위", "반영영역"])
+    ]
+    JEONG_SCORE_COL = cand[0] if cand else None
+
+    if JEONG_SCORE_COL is None:
+        st.warning("⚠ 정시 CSV에서 백분위 관련 컬럼을 찾을 수 없습니다. 정시 추천이 제한됩니다.")
+    else:
+        st.write(f"정시 백분위 컬럼 자동 인식됨 → **{JEONG_SCORE_COL}**")
+
+# =========================================
 #     ✔ 합격 여부 판정 (함창고 수시진학)
 # =========================================
 def decide_admit(row):
@@ -824,5 +843,6 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True
 )
+
 
 
