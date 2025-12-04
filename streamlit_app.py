@@ -266,32 +266,30 @@ def get_student_inputs():
     # -----------------------------------------
     #  백분위 추정용 개별 등급 입력
     # -----------------------------------------
-    st.write("### 1-2) 과목별 등급 입력 (선택, 백분위 자동 추정)")
-
     # -----------------------------------------
     #  1-2) 과목별 등급 입력 (정렬 수정됨)
     # -----------------------------------------
-    st.write("### 1-2) 과목별 등급 입력 (선택, 백분위 자동 추정)")
+    st.markdown("### 1-2) 과목별 등급 입력 (선택, 백분위 자동 추정)")
 
-    # 첫 번째 행: 국어, 수학, 탐구2
+    # 첫 번째 행: 국어, 수학, 영어
     row1_col1, row1_col2, row1_col3 = st.columns(3)
     with row1_col1:
         g_kor = st.number_input("국어", 1, 9, 1)
     with row1_col2:
         g_math = st.number_input("수학", 1, 9, 1)
     with row1_col3:
-        g_t2 = st.number_input("탐구2", 1, 9, 1)
+        g_eng = st.number_input("영어", 1, 9, 1)
 
-    # 두 번째 행: 영어, 탐구1, 한국사
+    # 두 번째 행: 탐구1, 탐구2, 한국사
     row2_col1, row2_col2, row2_col3 = st.columns(3)
     with row2_col1:
-        g_eng = st.number_input("영어", 1, 9, 1)
-    with row2_col2:
         g_t1 = st.number_input("탐구1", 1, 9, 1)
+    with row2_col2:
+        g_t2 = st.number_input("탐구2", 1, 9, 1)
     with row2_col3:
         g_hist = st.number_input("한국사", 1, 9, 1)
 
-
+    # 백분위 추정 계산용 리스트 구성
     grades = [g for g in [g_kor, g_math, g_eng, g_t1, g_t2] if g > 0]
 
     mock_percent_est = None
@@ -856,6 +854,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True
 )
+
 
 
 
