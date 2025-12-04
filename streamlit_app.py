@@ -319,7 +319,7 @@ def get_student_inputs():
 def render_jagajin_inside_tab():
 
     st.markdown("### 학생부 종합 전형 적합도 자가진단")
-    st.write("각 항목을 1~5점으로 체크해 주세요.")
+    st.write("각 문항을 1~5점으로 체크해 주세요.")
 
     questions = [
         "1) 이수 과목의 다양성과 난도가 충분하다.",
@@ -334,39 +334,59 @@ def render_jagajin_inside_tab():
         "10) 나만의 활동 키워드·주제가 일관적이다.",
     ]
 
-    scores = [st.slider(q, 1, 5, 3) for q in questions]
+    # ---------------------------
+    #     2단 정렬 UI
+    # ---------------------------
+    col_left, col_right = st.columns(2)
+    scores = []
 
+    with col_left:
+        for q in questions[:5]:
+            scores.append(st.slider(q, 1, 5, 3))
+
+    with col_right:
+        for q in questions[5:]:
+            scores.append(st.slider(q, 1, 5, 3))
+
+    # ---------------------------
+    #     결과 계산
+    # ---------------------------
     total = sum(scores)
     max_score = 5 * len(scores)
     ratio = total / max_score * 100
 
     st.markdown("### ● 평가 결과")
-    col1, col2 = st.columns(2)
+    r1, r2 = st.columns(2)
 
-    with col1:
+    with r1:
         st.metric("총점", f"{total} / {max_score}")
         st.metric("적합도", f"{ratio:.1f}%")
 
-    with col2:
+    with r2:
         if total >= 30:
             level, msg = "적정", "학생부 종합 전형 지원에 적합합니다."
         elif total >= 25:
-            level, msg = "보통", "기본 준비는 되어 있으나, 몇 가지 보완이 필요합니다."
+            level, msg = "보통", "기본 준비는 되어 있으나, 보완이 필요합니다."
         else:
             level, msg = "미흡", "학생부 관리와 전형 전략 재정비가 필요합니다."
 
         st.subheader(f"종합 평가: {level}")
         st.write(msg)
 
-    # 점수 그래프
-    df = pd.DataFrame({"문항": [f"Q{i+1}" for i in range(len(scores))], "점수": scores})
+    # ---------------------------
+    #     점수 그래프 2단 정렬
+    # ---------------------------
+    df = pd.DataFrame({
+        "문항": [f"Q{i+1}" for i in range(10)],
+        "점수": scores
+    })
 
     c1, c2 = st.columns(2)
-    half = len(df)//2
     with c1:
-        st.bar_chart(df.iloc[:half].set_index("문항"))
+        st.bar_chart(df.iloc[:5].set_index("문항"))
     with c2:
-        st.bar_chart(df.iloc[half:].set_index("문항"))
+        st.bar_chart(df.iloc[5:].set_index("문항"))
+
 # =========================================
 #      ✔ 뷰 1 : 함창고 등급대 분석
 # =========================================
@@ -854,6 +874,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True
 )
+
 
 
 
