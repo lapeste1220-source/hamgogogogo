@@ -43,6 +43,7 @@ st.caption("함창고 입결 + 2025 어디가 수시·정시·최저 데이터�
 DATA_DIR = Path(".")
 
 # CSV 파일 경로
+SUJI_2026_FILE = DATA_DIR / "수시진학관리(2025년12월29일).csv"
 SUJI_2025_FILE = DATA_DIR / "수시진학관리(2025년2월4일).csv"
 SUJI_2024_FILE = DATA_DIR / "수시진학관리(2024년2월20일).csv"
 SUSI_FILE = DATA_DIR / "2025수시입결.csv"
@@ -136,6 +137,12 @@ def normalize_columns(df):
 @st.cache_data
 def load_data():
     suji_list = []
+
+    if SUJI_2026_FILE.exists():
+        df25 = pd.read_csv(SUJI_2026_FILE, encoding="utf-8")
+        df25 = normalize_columns(df26)
+        df25["입시연도"] = 2026
+        suji_list.append(df25)
 
     if SUJI_2025_FILE.exists():
         df25 = pd.read_csv(SUJI_2025_FILE, encoding="utf-8")
@@ -874,6 +881,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True
 )
+
 
 
 
