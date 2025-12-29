@@ -139,10 +139,10 @@ def load_data():
     suji_list = []
 
     if SUJI_2026_FILE.exists():
-        df25 = pd.read_csv(SUJI_2026_FILE, encoding="utf-8")
-        df25 = normalize_columns(df26)
-        df25["입시연도"] = 2026
-        suji_list.append(df25)
+        df26 = pd.read_csv(SUJI_2026_FILE, encoding="utf-8")
+        df26 = normalize_columns(df26)
+        df26["입시연도"] = 2026
+        suji_list.append(df26)
 
     if SUJI_2025_FILE.exists():
         df25 = pd.read_csv(SUJI_2025_FILE, encoding="utf-8")
@@ -881,6 +881,7 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True
 )
+
 
 
 
