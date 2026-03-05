@@ -1,6 +1,10 @@
 # =========================================
-#        🔒 로그인 + 학교 로고 추가
+#   함창고 수시·정시 검색기 (수정 반영본)
+#   - 합격 판정: 등록여부 무시, '최종단계' 기준 합격사례만
+#   - 세부유형 키워드 필터: 합격자표뿐 아니라 합격률(분모)에도 반영
+#   - 검색조건 기준 전형별/전형분류별 합격률 표+차트 추가
 # =========================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,6 +12,17 @@ from pathlib import Path
 import re
 import altair as alt
 
+# =========================================
+#   ⚙️ 페이지 설정 (Streamlit 규칙상 최상단)
+# =========================================
+st.set_page_config(
+    page_title="함창고 수시·정시 검색기",
+    layout="wide",
+)
+
+# =========================================
+#        🔒 로그인 + 학교 로고
+# =========================================
 PASSWORD = "hamchang123"
 
 if "authenticated" not in st.session_state:
@@ -27,18 +42,11 @@ if not st.session_state.authenticated:
             st.error("비밀번호가 틀렸습니다.")
     st.stop()
 
-
 # =========================================
 #              기본 설정
 # =========================================
-st.set_page_config(
-    page_title="함창고 수시·정시 검색기",
-    layout="wide",
-)
-
 st.title("함창고 수시·정시 검색기")
 st.caption("함창고 입결 + 2025 어디가 수시·정시·최저 데이터를 통합 분석 (베타)")
-
 
 DATA_DIR = Path(".")
 
@@ -80,7 +88,7 @@ def get_univ_group(name):
 
 
 # =========================================
-#      🔧 최저 기준 판정 함수 (오류 해결)
+#      🔧 최저 기준 판정 함수
 # =========================================
 def parse_minimum_rule(rule_text, grades):
     if not rule_text or not isinstance(rule_text, str):
@@ -170,14 +178,13 @@ def load_data():
 
 
 suji_df, susi_df, jeong_df, choe_df = load_data()
+
 # =========================================
 #     ✔ 정시 백분위 컬럼 자동 탐색
 # =========================================
-
 JEONG_SCORE_COL = None
 
 if jeong_df is not None:
-    # 정시 CSV 컬럼명이 다양할 수 있어 유연한 탐색 적용
     cand = [
         c for c in jeong_df.columns
         if any(k in c.replace(" ", "") for k in ["백분위", "평균백분위", "반영영역"])
@@ -190,26 +197,22 @@ if jeong_df is not None:
         st.write(f"정시 백분위 컬럼 자동 인식됨 → **{JEONG_SCORE_COL}**")
 
 # =========================================
-#     ✔ 합격 여부 판정 (함창고 수시진학)
+#     ✔ 합격 여부 판정 (등록여부 무시 / 최종단계 기준)
+#       - '불합격'에 '합격' 포함되는 오판정 방지
 # =========================================
 def decide_admit(row):
-    reg = str(row.get("등록여부", ""))
-    final = str(row.get("최종단계", ""))
-    reason = str(row.get("불합격사유", ""))
+    final = str(row.get("최종단계", "")).strip()
 
-    bad = ["불합격", "미등록", "탈락", "포기", "최저미충족", "최저미달"]
-    if any(b in reason for b in bad):
+    if final.lower() == "nan":
+        final = ""
+
+    # 불합격이면 무조건 제외 (핵심)
+    if "불합격" in final:
         return False
 
-    ok_reg = ["등록", "합격"]
-    ok_final = ["합격", "최종합격", "추가합격", "추합"]
-
-    if any(o in reg for o in ok_reg):
-        return True
-    if any(o in final for o in ok_final):
-        return True
-
-    return False
+    # 합격사례만 통과 (등록여부/불합격사유는 보지 않음)
+    ok_final = ["최초합격", "충원합격", "추가합격", "추합", "최종합격", "합격"]
+    return any(k in final for k in ok_final)
 
 
 # =========================================
@@ -260,9 +263,6 @@ def get_student_inputs():
             min_value=0.0, max_value=100.0, step=1.0, value=0.0
         )
 
-    # -----------------------------------------
-    #  희망 대학/모집단위 입력
-    # -----------------------------------------
     st.markdown("### 1-1) 희망 대학/학과 입력")
     cu, cm = st.columns(2)
     with cu:
@@ -270,15 +270,8 @@ def get_student_inputs():
     with cm:
         target_major = st.text_input("희망 학과 / 모집단위 (선택 입력)", "")
 
-    # -----------------------------------------
-    #  백분위 추정용 개별 등급 입력
-    # -----------------------------------------
-    # -----------------------------------------
-    #  1-2) 과목별 등급 입력 (정렬 수정됨)
-    # -----------------------------------------
     st.markdown("### 1-2) 과목별 등급 입력 (선택, 백분위 자동 추정)")
 
-    # 첫 번째 행: 국어, 수학, 영어
     row1_col1, row1_col2, row1_col3 = st.columns(3)
     with row1_col1:
         g_kor = st.number_input("국어", 1, 9, 1)
@@ -287,7 +280,6 @@ def get_student_inputs():
     with row1_col3:
         g_eng = st.number_input("영어", 1, 9, 1)
 
-    # 두 번째 행: 탐구1, 탐구2, 한국사
     row2_col1, row2_col2, row2_col3 = st.columns(3)
     with row2_col1:
         g_t1 = st.number_input("탐구1", 1, 9, 1)
@@ -296,7 +288,6 @@ def get_student_inputs():
     with row2_col3:
         g_hist = st.number_input("한국사", 1, 9, 1)
 
-    # 백분위 추정 계산용 리스트 구성
     grades = [g for g in [g_kor, g_math, g_eng, g_t1, g_t2] if g > 0]
 
     mock_percent_est = None
@@ -307,9 +298,6 @@ def get_student_inputs():
 
     mock_percentile = mock_percent_input if mock_percent_input > 0 else mock_percent_est
 
-    # -----------------------------------------
-    #  희망 지역 선택
-    # -----------------------------------------
     region_list = ["서울", "경기", "인천", "부산", "대구", "경북", "충북", "충남"]
     selected_regions = st.multiselect(
         "희망 지역 선택",
@@ -341,9 +329,6 @@ def render_jagajin_inside_tab():
         "10) 나만의 활동 키워드·주제가 일관적이다.",
     ]
 
-    # ---------------------------
-    #     2단 정렬 UI
-    # ---------------------------
     col_left, col_right = st.columns(2)
     scores = []
 
@@ -355,9 +340,6 @@ def render_jagajin_inside_tab():
         for q in questions[5:]:
             scores.append(st.slider(q, 1, 5, 3))
 
-    # ---------------------------
-    #     결과 계산
-    # ---------------------------
     total = sum(scores)
     max_score = 5 * len(scores)
     ratio = total / max_score * 100
@@ -380,9 +362,6 @@ def render_jagajin_inside_tab():
         st.subheader(f"종합 평가: {level}")
         st.write(msg)
 
-    # ---------------------------
-    #     점수 그래프 2단 정렬
-    # ---------------------------
     df = pd.DataFrame({
         "문항": [f"Q{i+1}" for i in range(10)],
         "점수": scores
@@ -393,6 +372,7 @@ def render_jagajin_inside_tab():
         st.bar_chart(df.iloc[:5].set_index("문항"))
     with c2:
         st.bar_chart(df.iloc[5:].set_index("문항"))
+
 
 # =========================================
 #      ✔ 뷰 1 : 함창고 등급대 분석
@@ -452,7 +432,7 @@ def view_grade_analysis():
     if univ:
         filtered = filtered[filtered["대학명"].isin(univ)]
     if major_keyword:
-        filtered = filtered[filtered["모집단위"].astype(str).str.contains(major_keyword)]
+        filtered = filtered[filtered["모집단위"].astype(str).str.contains(major_keyword, na=False)]
 
     if filtered.empty:
         st.info("조건에 맞는 데이터가 없습니다.")
@@ -467,10 +447,80 @@ def view_grade_analysis():
         .fillna("기타")
     )
 
+    # ------------------------------------
+    #   ✔ 세부유형 검색 (키워드 AND) → base에 적용 (합격률 분모 반영)
+    # ------------------------------------
+    st.markdown("### 세부유형 필터")
+    keyword_input = st.text_input("세부유형 검색 (예: 농어촌 기회)", "")
+
+    base["세부유형"] = base.get("세부유형", "")
+
+    if keyword_input.strip():
+        keys = [k for k in re.split(r"[ ,]+", keyword_input) if k.strip()]
+
+        def match_kw(x):
+            x = str(x)
+            return all(k in x for k in keys)
+
+        base = base[base["세부유형"].apply(match_kw)]
+
+    if base.empty:
+        st.info("세부유형 조건까지 적용한 결과, 데이터가 없습니다.")
+        return
+
     admit_only = base[base["합격"]]
 
     # ------------------------------------
-    #       지역 분포 차트
+    #       (추가 기능) 전형별/전형분류별 합격률
+    # ------------------------------------
+    st.subheader("검색 조건 기준 전형별 합격률")
+
+    base["지원전형"] = base[vt_col].astype(str)
+
+    rate_df = (
+        base.groupby("지원전형", as_index=False)
+        .agg(전체지원=("합격", "size"), 합격=("합격", "sum"))
+    )
+    rate_df["합격률(%)"] = (rate_df["합격"] / rate_df["전체지원"] * 100).round(1)
+    rate_df = rate_df.sort_values(["합격률(%)", "전체지원"], ascending=False)
+
+    st.dataframe(rate_df, use_container_width=True, hide_index=True)
+
+    chart_rate = (
+        alt.Chart(rate_df)
+        .mark_bar()
+        .encode(
+            x=alt.X("지원전형:N", sort="-y"),
+            y=alt.Y("합격률(%):Q"),
+            tooltip=["지원전형", "전체지원", "합격", "합격률(%)"]
+        )
+    )
+    st.altair_chart(chart_rate, use_container_width=True)
+
+    st.subheader("검색 조건 기준 전형분류(교과/종합/농어촌/기타) 합격률")
+
+    rate2 = (
+        base.groupby("전형분류", as_index=False)
+        .agg(전체지원=("합격", "size"), 합격=("합격", "sum"))
+    )
+    rate2["합격률(%)"] = (rate2["합격"] / rate2["전체지원"] * 100).round(1)
+    rate2 = rate2.sort_values(["합격률(%)", "전체지원"], ascending=False)
+
+    st.dataframe(rate2, use_container_width=True, hide_index=True)
+
+    chart_rate2 = (
+        alt.Chart(rate2)
+        .mark_bar()
+        .encode(
+            x=alt.X("전형분류:N", sort="-y"),
+            y=alt.Y("합격률(%):Q"),
+            tooltip=["전형분류", "전체지원", "합격", "합격률(%)"]
+        )
+    )
+    st.altair_chart(chart_rate2, use_container_width=True)
+
+    # ------------------------------------
+    #       지역 분포 차트 (합격자)
     # ------------------------------------
     st.subheader("합격자 지역 분포")
 
@@ -484,7 +534,6 @@ def view_grade_analysis():
             .sort_values("합격자수", ascending=False)
         )
 
-        import altair as alt
         top_region = region_count.iloc[0]["지역"]
 
         chart = (
@@ -527,7 +576,7 @@ def view_grade_analysis():
         else:
             st.info("합격 데이터 없음")
 
-    # --- 최저 충족률 ---
+    # --- 최저 충족률(전형분류별, 최저 있는 전형 대상) ---
     with col_r:
         st.markdown("#### 최저 충족률")
         min_cols = [c for c in base.columns if "최저" in c]
@@ -537,7 +586,7 @@ def view_grade_analysis():
             cond = (
                 base[min_col].notna()
                 & (base[min_col].astype(str).str.strip() != "")
-                & (~base[min_col].astype(str).str.contains("없음"))
+                & (~base[min_col].astype(str).str.contains("없음", na=False))
             )
             base_min = base[cond]
             if not base_min.empty:
@@ -553,7 +602,17 @@ def view_grade_analysis():
                     .mark_bar()
                     .encode(
                         x="전형분류:O",
-                        y="최저충족률(%):Q",
+                        y="최저충족률(%)?:Q",
+                        tooltip=["전형분류", "최저충족률(%)"]
+                    )
+                )
+                # 위 y 인코딩에서 컬럼명에 괄호가 있어 혼동 방지: 명시적으로 다시 지정
+                bar = (
+                    alt.Chart(min_stats)
+                    .mark_bar()
+                    .encode(
+                        x="전형분류:O",
+                        y=alt.Y("최저충족률(%)":Q),
                         tooltip=["전형분류", "최저충족률(%)"]
                     )
                 )
@@ -564,7 +623,7 @@ def view_grade_analysis():
             st.info("최저 기준 컬럼 없음")
 
     # =========================================
-    #           ✔ 상세 표 (핵심)
+    #           ✔ 상세 표 (합격사례)
     # =========================================
     st.markdown("---")
     st.markdown("### 필터 조건에 따른 상세 합격 학과 목록")
@@ -575,30 +634,16 @@ def view_grade_analysis():
         return
 
     # 이름 마스킹
-    detail["이름마스킹"] = detail["이름"].astype(str).str[0] + "OO"
+    if "이름" in detail.columns:
+        detail["이름마스킹"] = detail["이름"].astype(str).str[0] + "OO"
+    else:
+        detail["이름마스킹"] = "OO"
 
     # 지원전형
-    if "전형유형" in detail.columns:
-        detail["지원전형"] = detail["전형유형"]
-    else:
-        detail["지원전형"] = detail["전형명(대)"]
+    detail["지원전형"] = detail[vt_col].astype(str)
 
     # 세부유형
     detail["세부유형"] = detail.get("세부유형", "")
-
-    # ------------------------------------
-    #    ✔ 세부유형 검색 (키워드 AND)
-    # ------------------------------------
-    keyword_input = st.text_input("세부유형 검색 (예: 농어촌 기회)", "")
-
-    if keyword_input.strip():
-        keys = [k for k in re.split(r"[ ,]+", keyword_input) if k.strip()]
-
-        def match_kw(x):
-            x = str(x)
-            return all(k in x for k in keys)
-
-        detail = detail[detail["세부유형"].apply(match_kw)]
 
     # 최저 처리
     min_cols = [c for c in detail.columns if "최저" in c]
@@ -619,6 +664,8 @@ def view_grade_analysis():
     )
 
     st.dataframe(table_df, use_container_width=True, hide_index=True)
+
+
 # =========================================
 #       ✔ 추천 공통 유틸 (중복 제거)
 # =========================================
@@ -648,6 +695,8 @@ def pick_recommendations(df, label_col, diff_col, top_n=3):
         rec = rec.drop_duplicates(subset=dedup_keys, keep="first")
 
     return rec
+
+
 # =========================================
 #    ✔ 뷰 2 : 수시·정시 추천 탐색기
 # =========================================
@@ -655,7 +704,6 @@ def view_recommend():
 
     st.header("수시·정시 추천 탐색기")
 
-    # 학생 입력 가져오기
     my_grade, mock_percentile, regions, target_univ, target_major = get_student_inputs()
 
     tab_su, tab_je, tab_jg = st.tabs(["수시 추천", "정시 추천", "학생부종합 자가진단"])
@@ -681,7 +729,6 @@ def view_recommend():
             st.info("해당 조건에서 추천할 데이터가 없습니다.")
             return
 
-        # 🔥 세부전형 컬럼 자동 포함
         group_cols = ["대학명", "모집단위", "전형유형"]
 
         if "전형세부유형" in df.columns:
@@ -697,7 +744,6 @@ def view_recommend():
 
         agg["내신차이(합-입)"] = agg["합격평균내신"] - my_grade
 
-        # 등급 차이에 따른 추천 레벨
         def label_row(d):
             diff = d["내신차이(합-입)"]
             if diff > 0.3:
@@ -708,18 +754,16 @@ def view_recommend():
 
         agg["추천구분"] = agg.apply(label_row, axis=1)
 
-        # 희망 대학 / 학과 필터
         if target_univ:
-            agg = agg[agg["대학명"].astype(str).str.contains(target_univ)]
+            agg = agg[agg["대학명"].astype(str).str.contains(target_univ, na=False)]
         if target_major:
-            agg = agg[agg["모집단위"].astype(str).str.contains(target_major)]
+            agg = agg[agg["모집단위"].astype(str).str.contains(target_major, na=False)]
 
         rec = pick_recommendations(agg, "추천구분", "내신차이(합-입)", top_n=3)
 
         if rec.empty:
             st.info("추천 결과가 없습니다.")
         else:
-            # 세부전형 컬럼 자동 추가
             detail_col = (
                 "전형세부유형" if "전형세부유형" in rec.columns else
                 "세부유형" if "세부유형" in rec.columns else None
@@ -730,7 +774,6 @@ def view_recommend():
             cols += ["합격평균내신", "내신차이(합-입)"]
 
             st.dataframe(rec[cols], hide_index=True, use_container_width=True)
-
 
     # ---------------------------------------------------
     #              ✔ 정시 추천
@@ -763,30 +806,34 @@ def view_recommend():
 
         def label_j(row):
             d = row["백분위차이(합-입)"]
-            if d > 3: return "상향(도전)"
-            if d < -3: return "안전"
+            if d > 3:
+                return "상향(도전)"
+            if d < -3:
+                return "안전"
             return "적정"
 
         dfj["추천구분"] = dfj.apply(label_j, axis=1)
 
-        # 희망 대학/학과 필터
         if target_univ:
-            dfj = dfj[dfj["대학명"].astype(str).str.contains(target_univ)]
+            dfj = dfj[dfj["대학명"].astype(str).str.contains(target_univ, na=False)]
         if target_major:
-            dfj = dfj[dfj["모집단위"].astype(str).str.contains(target_major)]
+            dfj = dfj[dfj["모집단위"].astype(str).str.contains(target_major, na=False)]
 
         recj = pick_recommendations(dfj, "추천구분", "백분위차이(합-입)", top_n=3)
 
         colsj = ["추천구분", "대학명", "전형명", "모집군", "모집단위",
                  "정시평균백분위", "백분위차이(합-입)"]
 
-        st.dataframe(recj[colsj], use_container_width=True, hide_index=True)
+        show_cols = [c for c in colsj if c in recj.columns]
+        st.dataframe(recj[show_cols], use_container_width=True, hide_index=True)
 
     # ---------------------------------------------------
     #              ✔ 학생부 종합 자가진단
     # ---------------------------------------------------
     with tab_jg:
         render_jagajin_inside_tab()
+
+
 # =========================================
 #    ✔ 뷰 3 : 최저 기준으로 대학 찾기
 # =========================================
@@ -833,9 +880,9 @@ def view_choejeo():
         if keyword:
             key = keyword.replace(" ", "")
             df = df[
-                df["대학명"].astype(str).str.contains(key)
-                | df["모집단위명"].astype(str).str.contains(key)
-                | df["최저학력기준내용"].astype(str).str.contains(key)
+                df["대학명"].astype(str).str.contains(key, na=False)
+                | df["모집단위명"].astype(str).str.contains(key, na=False)
+                | df["최저학력기준내용"].astype(str).str.contains(key, na=False)
             ]
 
         if df.empty:
@@ -852,7 +899,10 @@ def view_choejeo():
             return
 
         cols = ["지역구분", "대학명", "전형세부유형", "모집단위명", "최저학력기준내용"]
-        st.dataframe(df_ok[cols], hide_index=True, use_container_width=True)
+        show_cols = [c for c in cols if c in df_ok.columns]
+        st.dataframe(df_ok[show_cols], hide_index=True, use_container_width=True)
+
+
 # =========================================
 #              사이드바 메뉴
 # =========================================
@@ -881,12 +931,3 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True
 )
-
-
-
-
-
-
-
-
-
