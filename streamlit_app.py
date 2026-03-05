@@ -495,29 +495,7 @@ def view_grade_analysis():
     )
     st.altair_chart(chart_rate, use_container_width=True)
 
-    st.subheader("검색 조건 기준 전형분류(교과/종합/농어촌/기타) 합격률")
-
-    rate2 = (
-        base.groupby("전형분류", as_index=False)
-        .agg(전체지원=("합격", "size"), 합격=("합격", "sum"))
-    )
-    rate2["합격률_pct"] = (rate2["합격"] / rate2["전체지원"] * 100).round(1)
-    rate2 = rate2.sort_values(["합격률_pct", "전체지원"], ascending=False)
-
-    show_rate2 = rate2.rename(columns={"합격률_pct": "합격률(%)"})
-    st.dataframe(show_rate2, use_container_width=True, hide_index=True)
-
-    chart_rate2 = (
-        alt.Chart(rate2)
-        .mark_bar()
-        .encode(
-            x=alt.X("전형분류:N", sort="-y"),
-            y=alt.Y("합격률_pct:Q"),
-            tooltip=["전형분류", "전체지원", "합격", alt.Tooltip("합격률_pct:Q", title="합격률(%)")]
-        )
-    )
-    st.altair_chart(chart_rate2, use_container_width=True)
-
+   
     # ------------------------------------
     #       합격자 지역 분포
     # ------------------------------------
@@ -888,3 +866,4 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True
 )
+
