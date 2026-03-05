@@ -576,51 +576,41 @@ def view_grade_analysis():
         else:
             st.info("합격 데이터 없음")
 
-    # --- 최저 충족률(전형분류별, 최저 있는 전형 대상) ---
-    with col_r:
-        st.markdown("#### 최저 충족률")
-        min_cols = [c for c in base.columns if "최저" in c]
-        min_col = min_cols[0] if min_cols else None
+# --- 최저 충족률(전형분류별, 최저 있는 전형 대상) ---
+with col_r:
+    st.markdown("#### 최저 충족률")
+    min_cols = [c for c in base.columns if "최저" in c]
+    min_col = min_cols[0] if min_cols else None
 
-        if min_col:
-            cond = (
-                base[min_col].notna()
-                & (base[min_col].astype(str).str.strip() != "")
-                & (~base[min_col].astype(str).str.contains("없음", na=False))
+    if min_col:
+        cond = (
+            base[min_col].notna()
+            & (base[min_col].astype(str).str.strip() != "")
+            & (~base[min_col].astype(str).str.contains("없음", na=False))
+        )
+        base_min = base[cond]
+        if not base_min.empty:
+            min_stats = (
+                base_min.groupby("전형분류")["합격"]
+                .mean()
+                .reset_index(name="최저충족률")
             )
-            base_min = base[cond]
-            if not base_min.empty:
-                min_stats = (
-                    base_min.groupby("전형분류")["합격"]
-                    .mean()
-                    .reset_index(name="최저충족률")
-                )
-                min_stats["최저충족률(%)"] = (min_stats["최저충족률"] * 100).round(1)
+            min_stats["최저충족률(%)"] = (min_stats["최저충족률"] * 100).round(1)
 
-                bar = (
-                    alt.Chart(min_stats)
-                    .mark_bar()
-                    .encode(
-                        x="전형분류:O",
-                        y="최저충족률(%)?:Q",
-                        tooltip=["전형분류", "최저충족률(%)"]
-                    )
+            bar = (
+                alt.Chart(min_stats)
+                .mark_bar()
+                .encode(
+                    x=alt.X("전형분류:N", sort="-y"),
+                    y=alt.Y("최저충족률(%):Q"),
+                    tooltip=["전형분류", "최저충족률(%)"]
                 )
-                # 위 y 인코딩에서 컬럼명에 괄호가 있어 혼동 방지: 명시적으로 다시 지정
-                bar = (
-                    alt.Chart(min_stats)
-                    .mark_bar()
-                    .encode(
-                        x="전형분류:O",
-                        y=alt.Y("최저충족률(%)":Q),
-                        tooltip=["전형분류", "최저충족률(%)"]
-                    )
-                )
-                st.altair_chart(bar, use_container_width=True)
-            else:
-                st.info("최저 기준 있는 전형 없음")
+            )
+            st.altair_chart(bar, use_container_width=True)
         else:
-            st.info("최저 기준 컬럼 없음")
+            st.info("최저 기준 있는 전형 없음")
+    else:
+        st.info("최저 기준 컬럼 없음")
 
     # =========================================
     #           ✔ 상세 표 (합격사례)
@@ -931,3 +921,4 @@ st.markdown(
     "<div style='text-align:center; font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
     unsafe_allow_html=True
 )
+
