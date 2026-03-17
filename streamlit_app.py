@@ -258,60 +258,93 @@ if jeong_df is not None:
 #   - 2026은 5등급변환내신 칼럼 별도 제공
 # =========================================
 SUJI_HAS_DATA = suji_df is not None and not suji_df.empty
-col_9 = None
-col_5 = None
+col_9_old = None
+col_9_new = None
+col_5_new = None
 
 if SUJI_HAS_DATA:
-    # 9등급 계열 컬럼 탐색
-    candidates_9 = [
-        ["9등급", "일반등급"],
-        ["9등급", "등급"],
-        ["일반등급"],
-        ["전교과평균등급"],
-        ["평균등급"],
+    # -----------------------------
+    # 2024~2025 구양식용 9등급 컬럼
+    # -----------------------------
+    old_9_candidates = [
+        "일반등급",
+        "전교과평균등급",
+        "평균등급",
+        "내등급(환산)",
     ]
-    for keys in candidates_9:
-        col_9 = find_col_contains(
-            suji_df,
-            keys,
-            exclude_keywords=["5등급", "한국사", "탐구", "제2외", "최저", "기준"]
-        )
-        if col_9:
+
+    for c in old_9_candidates:
+        if c in suji_df.columns:
+            col_9_old = c
             break
 
-    # 5등급 계열 컬럼 탐색
-    candidates_5 = [
-        ["5등급", "일반등급"],
-        ["5등급", "등급"],
-        ["내등급(환산)"],
-        ["내등급", "환산"],
-    ]
-    for keys in candidates_5:
-        col_5 = find_col_contains(
-            suji_df,
-            keys,
-            exclude_keywords=["9등급", "한국사", "탐구", "제2외", "최저", "기준"]
-        )
-        if col_5:
+    # -----------------------------
+    # 2026 신양식용 9등급 컬럼
+    # 반드시 '점수'가 아니라 '등급'만 잡도록 제한
+    # -----------------------------
+    for c in suji_df.columns:
+        s = str(c)
+        if (
+            "9등급" in s
+            and "등급" in s
+            and "점수" not in s
+            and "한국사" not in s
+            and "탐구" not in s
+            and "제2외" not in s
+            and "최저" not in s
+            and "기준" not in s
+        ):
+            col_9_new = c
             break
 
-    if col_9:
-        suji_df["대표등급_9"] = pd.to_numeric(suji_df[col_9], errors="coerce")
-    else:
-        suji_df["대표등급_9"] = np.nan
+    # -----------------------------
+    # 2026 신양식용 5등급 컬럼
+    # -----------------------------
+    for c in suji_df.columns:
+        s = str(c)
+        if (
+            "5등급" in s
+            and "등급" in s
+            and "점수" not in s
+            and "한국사" not in s
+            and "탐구" not in s
+            and "제2외" not in s
+            and "최저" not in s
+            and "기준" not in s
+        ):
+            col_5_new = c
+            break
 
-    if col_5:
-        suji_df["대표등급_5"] = pd.to_numeric(suji_df[col_5], errors="coerce")
-    else:
-        suji_df["대표등급_5"] = np.nan
+    # 기본 빈 컬럼 생성
+    suji_df["대표등급_9_old"] = np.nan
+    suji_df["대표등급_9_new"] = np.nan
+    suji_df["대표등급_5_new"] = np.nan
 
-    # 기존 조회 기준은 대표등급_9 유지
-    suji_df["대표등급"] = suji_df["대표등급_9"]
+    # 구양식 9등급
+    if col_9_old:
+        suji_df["대표등급_9_old"] = pd.to_numeric(suji_df[col_9_old], errors="coerce")
 
-    # 2026 이상만 5등급 변환값 표시
+    # 신양식 9등급
+    if col_9_new:
+        suji_df["대표등급_9_new"] = pd.to_numeric(suji_df[col_9_new], errors="coerce")
+
+    # 신양식 5등급
+    if col_5_new:
+        suji_df["대표등급_5_new"] = pd.to_numeric(suji_df[col_5_new], errors="coerce")
+
+    # -----------------------------
+    # 최종 대표등급:
+    # 1순위: 구양식 9등급
+    # 2순위: 신양식 9등급
+    # -----------------------------
+    suji_df["대표등급"] = suji_df["대표등급_9_old"].fillna(suji_df["대표등급_9_new"])
+
+    # 5등급변환내신:
+    # 2026 이상만 신양식 5등급 표시
+    # -----------------------------
     suji_df["5등급변환내신"] = np.where(
         suji_df["입시연도"] >= 2026,
-        suji_df["대표등급_5"],
+        suji_df["대표등급_5_new"],
         np.nan
     )
 
@@ -948,8 +981,9 @@ with st.sidebar:
                 sorted(suji_df.dropna(subset=["대표등급_5"])["입시연도"].unique().tolist())
             )
 
-        st.write("9등급 컬럼 선택:", col_9)
-        st.write("5등급 컬럼 선택:", col_5)
+        st.write("구양식 9등급 컬럼:", col_9_old)
+        st.write("신양식 9등급 컬럼:", col_9_new)
+        st.write("신양식 5등급 컬럼:", col_5_new)
 
     st.markdown("---")
     st.markdown(
