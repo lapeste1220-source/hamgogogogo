@@ -48,7 +48,23 @@ if not st.session_state.authenticated:
 # =========================================
 st.title("함창고 수시·정시 검색기")
 st.caption("함창고 입결 + 2025 어디가 수시·정시·최저 데이터를 통합 분석 (베타)")
+st.markdown("### 디버그 확인")
 
+st.write("2026 파일 경로:", SUJI_2026_FILE)
+st.write("2026 파일 존재 여부:", SUJI_2026_FILE.exists())
+
+if SUJI_2026_FILE.exists():
+    try:
+        test26 = pd.read_csv(SUJI_2026_FILE, encoding="utf-8")
+        st.write("2026 파일 행 개수:", len(test26))
+        st.write("2026 파일 컬럼명:", list(test26.columns))
+    except Exception as e:
+        st.error(f"2026 파일 읽기 오류: {e}")
+
+if suji_df is not None:
+    st.write("통합 후 입시연도 목록:", sorted(suji_df["입시연도"].dropna().unique()))
+    st.write("통합 데이터 행 개수:", len(suji_df))
+    
 DATA_DIR = Path(".")
 
 # CSV 파일 경로
