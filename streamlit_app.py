@@ -71,7 +71,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 # =========================================
 #           데이터 로드
 # =========================================
-@st.cache_data
+# @st.cache_data
 def load_data():
     suji_list = []
 
