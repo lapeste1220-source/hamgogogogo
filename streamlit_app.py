@@ -52,7 +52,7 @@ st.caption("함창고 입결 + 2025 어디가 수시·정시·최저 데이터�
 DATA_DIR = Path(".")
 
 # CSV 파일 경로
-SUJI_2026_FILE = DATA_DIR / "수시진학관리(2026년2월27일).csv"
+SUJI_2026_FILE = DATA_DIR / "수시진학관리(2026년2월27일).CSV"
 SUJI_2025_FILE = DATA_DIR / "수시진학관리(2025년2월4일).csv"
 SUJI_2024_FILE = DATA_DIR / "수시진학관리(2024년2월20일).csv"
 SUSI_FILE = DATA_DIR / "2025수시입결.csv"
