@@ -180,6 +180,26 @@ def pick_recommendations(df, label_col, diff_col, top_n=3):
     return rec
 
 
+def count_valid_range(series, low, high):
+    vals = pd.to_numeric(series, errors="coerce")
+    return ((vals >= low) & (vals <= high)).sum()
+
+def pick_best_grade_col(df: pd.DataFrame, candidates, low, high, min_valid=30):
+    best_col = None
+    best_count = -1
+
+    for c in candidates:
+        if c not in df.columns:
+            continue
+        cnt = count_valid_range(df[c], low, high)
+        if cnt > best_count:
+            best_count = cnt
+            best_col = c
+
+    if best_count >= min_valid:
+        return best_col
+    return None
+
 # =========================================
 #   데이터 로드
 # =========================================
@@ -284,44 +304,76 @@ col_9_new = None
 col_5_new = None
 
 if SUJI_HAS_DATA:
-    # 2024~2025 구양식 9등급 컬럼
+    df_old = suji_df[suji_df["입시연도"] < 2026].copy()
+    df_new = suji_df[suji_df["입시연도"] >= 2026].copy()
+
+    # -----------------------------
+    # 2024~2025 구양식 9등급 후보
+    # -----------------------------
     old_9_candidates = [
         "일반등급",
         "전교과평균등급",
         "평균등급",
         "내등급(환산)",
     ]
+
+    # 이름으로 먼저 찾고
     for c in old_9_candidates:
         if c in suji_df.columns:
             col_9_old = c
             break
 
-    # 2026 신양식 9등급 일반등급 컬럼
-    new_9_candidates = [
-        "(9등급)_일반등급",
-        "(9등급)_일반등급(9등급)",
-        "9등급_일반등급",
-        "(9등급)_등급",
-        "9등급_등급",
-    ]
-    for c in new_9_candidates:
-        if c in suji_df.columns:
-            col_9_new = c
-            break
+    # 그래도 없으면 1~9 범위 많은 컬럼 자동 선택
+    if col_9_old is None and not df_old.empty:
+        old_numeric_candidates = [
+            c for c in suji_df.columns
+            if ("등급" in str(c))
+            and ("점수" not in str(c))
+            and ("5등급" not in str(c))
+            and ("한국사" not in str(c))
+            and ("탐구" not in str(c))
+            and ("제2외" not in str(c))
+            and ("최저" not in str(c))
+            and ("기준" not in str(c))
+        ]
+        col_9_old = pick_best_grade_col(df_old, old_numeric_candidates, 1, 9, min_valid=10)
 
-    # 2026 신양식 5등급 일반등급 컬럼
-    new_5_candidates = [
-        "(5등급)_일반등급",
-        "(5등급)_일반등급(5등급)",
-        "5등급_일반등급",
-        "(5등급)_등급",
-        "5등급_등급",
-        "내등급(환산)",
+    # -----------------------------
+    # 2026 신양식 9등급 후보
+    # -----------------------------
+    new_9_candidates = [
+        c for c in suji_df.columns
+        if ("등급" in str(c))
+        and ("점수" not in str(c))
+        and ("5등급" not in str(c))
+        and ("한국사" not in str(c))
+        and ("탐구" not in str(c))
+        and ("제2외" not in str(c))
+        and ("최저" not in str(c))
+        and ("기준" not in str(c))
     ]
-    for c in new_5_candidates:
-        if c in suji_df.columns:
-            col_5_new = c
-            break
+    if not df_new.empty:
+        col_9_new = pick_best_grade_col(df_new, new_9_candidates, 1, 9, min_valid=30)
+
+    # -----------------------------
+    # 2026 신양식 5등급 후보
+    # -----------------------------
+    new_5_candidates = [
+        c for c in suji_df.columns
+        if ("등급" in str(c))
+        and ("점수" not in str(c))
+        and (
+            ("5등급" in str(c))
+            or ("환산" in str(c))
+        )
+        and ("한국사" not in str(c))
+        and ("탐구" not in str(c))
+        and ("제2외" not in str(c))
+        and ("최저" not in str(c))
+        and ("기준" not in str(c))
+    ]
+    if not df_new.empty:
+        col_5_new = pick_best_grade_col(df_new, new_5_candidates, 1, 5, min_valid=30)
 
     suji_df["대표등급_9_old"] = np.nan
     suji_df["대표등급_9_new"] = np.nan
@@ -336,10 +388,14 @@ if SUJI_HAS_DATA:
     if col_5_new:
         suji_df["대표등급_5_new"] = pd.to_numeric(suji_df[col_5_new], errors="coerce")
 
-    # 대표등급: 기존 일반내신등급(9등급) 기준
-    suji_df["대표등급"] = suji_df["대표등급_9_old"].fillna(suji_df["대표등급_9_new"])
+    # 연도별로 대표등급 분리 적용
+    suji_df["대표등급"] = np.where(
+        suji_df["입시연도"] >= 2026,
+        suji_df["대표등급_9_new"],
+        suji_df["대표등급_9_old"]
+    )
 
-    # 2026 이상만 5등급 변환값 표시
+    # 2026만 5등급 변환 내신 표시
     suji_df["5등급변환내신"] = np.where(
         suji_df["입시연도"] >= 2026,
         suji_df["대표등급_5_new"],
