@@ -1,9 +1,9 @@
 # =========================================
-#   함창고 수시·정시 검색기 (진짜 마지막 완성본)
-#   - 2024~2026 통합 조회 유지
+#   함창고 수시·정시 검색기 (최종 수정 완성본)
+#   - 2024~2026 통합 조회
+#   - 2026 CSV 2줄 헤더 대응
 #   - 등급대 분석 메뉴 유지
-#   - 2026 데이터는 상세표에 5등급변환내신 추가 표시
-#   - 2024, 2025는 5등급변환내신 공란
+#   - 상세표에 2026만 5등급변환내신 표시
 # =========================================
 
 import streamlit as st
@@ -66,17 +66,41 @@ def safe_read_csv(path: Path):
     return None
 
 
+def read_suji_2026_csv(path: Path):
+    if not path.exists():
+        return None
+
+    encodings = ["utf-8", "utf-8-sig", "cp949", "euc-kr"]
+    last_error = None
+
+    for enc in encodings:
+        try:
+            # 2026 파일은 2줄 헤더
+            df = pd.read_csv(path, encoding=enc, header=[0, 1])
+
+            flat_cols = []
+            for top, sub in df.columns:
+                top = str(top).strip().replace("\n", "").replace(" ", "")
+                sub = str(sub).strip().replace("\n", "").replace(" ", "")
+
+                # Unnamed 처리
+                if sub == "" or sub.lower().startswith("unnamed"):
+                    flat_cols.append(top)
+                else:
+                    flat_cols.append(f"{top}_{sub}")
+
+            df.columns = flat_cols
+            return df
+
+        except Exception as e:
+            last_error = e
+
+    st.error(f"2026 CSV 읽기 실패: {path.name} / 오류: {last_error}")
+    return None
+
+
 def get_file_version(path: Path):
     return path.stat().st_mtime if path.exists() else None
-
-
-def find_col_contains(df: pd.DataFrame, keywords, exclude_keywords=None):
-    exclude_keywords = exclude_keywords or []
-    for c in df.columns:
-        s = str(c)
-        if all(k in s for k in keywords) and not any(x in s for x in exclude_keywords):
-            return c
-    return None
 
 
 def decide_admit(row) -> bool:
@@ -164,7 +188,7 @@ def load_data(file_versions):
     suji_list = []
 
     if SUJI_2026_FILE.exists():
-        df26 = safe_read_csv(SUJI_2026_FILE)
+        df26 = read_suji_2026_csv(SUJI_2026_FILE)
         if df26 is not None and not df26.empty:
             df26 = normalize_columns(df26)
             df26["입시연도"] = 2026
@@ -253,9 +277,6 @@ if jeong_df is not None:
 
 # =========================================
 #   수시 데이터 전처리
-#   핵심:
-#   - 대표등급은 기존 체제(9등급 계열) 기준 유지
-#   - 2026은 5등급변환내신 칼럼 별도 제공
 # =========================================
 SUJI_HAS_DATA = suji_df is not None and not suji_df.empty
 col_9_old = None
@@ -263,85 +284,62 @@ col_9_new = None
 col_5_new = None
 
 if SUJI_HAS_DATA:
-    # -----------------------------
-    # 2024~2025 구양식용 9등급 컬럼
-    # -----------------------------
+    # 2024~2025 구양식 9등급 컬럼
     old_9_candidates = [
         "일반등급",
         "전교과평균등급",
         "평균등급",
         "내등급(환산)",
     ]
-
     for c in old_9_candidates:
         if c in suji_df.columns:
             col_9_old = c
             break
 
-    # -----------------------------
-    # 2026 신양식용 9등급 컬럼
-    # 반드시 '점수'가 아니라 '등급'만 잡도록 제한
-    # -----------------------------
-    for c in suji_df.columns:
-        s = str(c)
-        if (
-            "9등급" in s
-            and "등급" in s
-            and "점수" not in s
-            and "한국사" not in s
-            and "탐구" not in s
-            and "제2외" not in s
-            and "최저" not in s
-            and "기준" not in s
-        ):
+    # 2026 신양식 9등급 일반등급 컬럼
+    new_9_candidates = [
+        "(9등급)_일반등급",
+        "(9등급)_일반등급(9등급)",
+        "9등급_일반등급",
+        "(9등급)_등급",
+        "9등급_등급",
+    ]
+    for c in new_9_candidates:
+        if c in suji_df.columns:
             col_9_new = c
             break
 
-    # -----------------------------
-    # 2026 신양식용 5등급 컬럼
-    # -----------------------------
-    for c in suji_df.columns:
-        s = str(c)
-        if (
-            "5등급" in s
-            and "등급" in s
-            and "점수" not in s
-            and "한국사" not in s
-            and "탐구" not in s
-            and "제2외" not in s
-            and "최저" not in s
-            and "기준" not in s
-        ):
+    # 2026 신양식 5등급 일반등급 컬럼
+    new_5_candidates = [
+        "(5등급)_일반등급",
+        "(5등급)_일반등급(5등급)",
+        "5등급_일반등급",
+        "(5등급)_등급",
+        "5등급_등급",
+        "내등급(환산)",
+    ]
+    for c in new_5_candidates:
+        if c in suji_df.columns:
             col_5_new = c
             break
 
-    # 기본 빈 컬럼 생성
     suji_df["대표등급_9_old"] = np.nan
     suji_df["대표등급_9_new"] = np.nan
     suji_df["대표등급_5_new"] = np.nan
 
-    # 구양식 9등급
     if col_9_old:
         suji_df["대표등급_9_old"] = pd.to_numeric(suji_df[col_9_old], errors="coerce")
 
-    # 신양식 9등급
     if col_9_new:
         suji_df["대표등급_9_new"] = pd.to_numeric(suji_df[col_9_new], errors="coerce")
 
-    # 신양식 5등급
     if col_5_new:
         suji_df["대표등급_5_new"] = pd.to_numeric(suji_df[col_5_new], errors="coerce")
 
-    # -----------------------------
-    # 최종 대표등급:
-    # 1순위: 구양식 9등급
-    # 2순위: 신양식 9등급
-    # -----------------------------
+    # 대표등급: 기존 일반내신등급(9등급) 기준
     suji_df["대표등급"] = suji_df["대표등급_9_old"].fillna(suji_df["대표등급_9_new"])
 
-    # 5등급변환내신:
-    # 2026 이상만 신양식 5등급 표시
-    # -----------------------------
+    # 2026 이상만 5등급 변환값 표시
     suji_df["5등급변환내신"] = np.where(
         suji_df["입시연도"] >= 2026,
         suji_df["대표등급_5_new"],
@@ -495,12 +493,10 @@ def view_grade_analysis():
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        min_g = float(np.floor(df["대표등급"].min()))
-        max_g = float(np.ceil(df["대표등급"].max()))
         grade_min, grade_max = st.slider(
             "대표등급 범위",
-            min_value=min_g, max_value=max_g,
-            value=(min_g, max_g), step=0.1
+            min_value=1.0, max_value=9.0,
+            value=(1.0, 9.0), step=0.1
         )
 
     with col2:
@@ -715,7 +711,6 @@ def view_grade_analysis():
     else:
         detail["최저"] = "없음"
 
-    # 2024, 2025는 공란처럼 보이도록 처리
     if "5등급변환내신" in detail.columns:
         detail["5등급변환내신"] = detail["5등급변환내신"].where(
             detail["입시연도"] >= 2026,
@@ -958,7 +953,7 @@ with st.sidebar:
         st.write("2024 파일 존재:", SUJI_2024_FILE.exists())
 
         if SUJI_2026_FILE.exists():
-            test26 = safe_read_csv(SUJI_2026_FILE)
+            test26 = read_suji_2026_csv(SUJI_2026_FILE)
             if test26 is not None:
                 st.write("2026 행 수:", len(test26))
                 st.write("2026 컬럼 수:", len(test26.columns))
@@ -969,17 +964,9 @@ with st.sidebar:
         else:
             st.write("통합 수시 데이터 없음")
 
-        if suji_df is not None and "대표등급_9" in suji_df.columns:
-            st.write(
-                "대표등급_9 결측 제외 연도:",
-                sorted(suji_df.dropna(subset=["대표등급_9"])["입시연도"].unique().tolist())
-            )
-
-        if suji_df is not None and "대표등급_5" in suji_df.columns:
-            st.write(
-                "대표등급_5 결측 제외 연도:",
-                sorted(suji_df.dropna(subset=["대표등급_5"])["입시연도"].unique().tolist())
-            )
+        if suji_df is not None and "대표등급" in suji_df.columns:
+            valid = suji_df.dropna(subset=["대표등급"])
+            st.write("대표등급 존재 연도:", sorted(valid["입시연도"].unique().tolist()) if not valid.empty else [])
 
         st.write("구양식 9등급 컬럼:", col_9_old)
         st.write("신양식 9등급 컬럼:", col_9_new)
