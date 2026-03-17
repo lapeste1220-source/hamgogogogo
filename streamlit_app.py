@@ -1,5 +1,8 @@
 # =========================================
-#   함창고 수시·정시 검색기 (안정화 전체본)
+#   함창고 수시·정시 검색기 (완전 합본 최종본)
+#   - 2026 양식(5등급제 포함) 대응
+#   - 2024~2026 통합 분석
+#   - 2026+ 5등급제 분석 메뉴 추가
 # =========================================
 
 import streamlit as st
@@ -71,9 +74,11 @@ def decide_admit(row) -> bool:
     if final.lower() == "nan":
         final = ""
 
+    # 불합격이면 제외
     if "불합격" in final:
         return False
 
+    # 합격 계열 키워드
     ok_final = ["최초합격", "충원합격", "추가합격", "추합", "최종합격", "합격"]
     return any(k in final for k in ok_final)
 
@@ -93,11 +98,13 @@ def parse_minimum_rule(rule_text, grades):
     if not nums:
         return False
 
+    # 예: 2등급이내
     m_each = re.search(r"(\d)등급이내", t)
     if m_each:
         limit = int(m_each.group(1))
         return all(g <= limit for g in nums)
 
+    # 예: 2개영역합5이내
     m_sum = re.search(r"(?:중)?(\d)개영역?합(\d+)이내", t)
     if m_sum:
         n = int(m_sum.group(1))
@@ -107,6 +114,7 @@ def parse_minimum_rule(rule_text, grades):
             return False
         return sum(nums_sorted[:n]) <= limit
 
+    # 예: 각1등급
     m_each2 = re.search(r"각(\d)등급", t)
     if m_each2:
         limit = int(m_each2.group(1))
@@ -143,9 +151,18 @@ def pick_recommendations(df, label_col, diff_col, top_n=3):
     return rec
 
 
+def find_col_contains(df: pd.DataFrame, keywords, exclude_keywords=None):
+    exclude_keywords = exclude_keywords or []
+    for c in df.columns:
+        s = str(c)
+        if all(k in s for k in keywords) and not any(x in s for x in exclude_keywords):
+            return c
+    return None
+
+
 # =========================================
 #   데이터 로드
-#   파일 수정시간을 함께 넣어 캐시 갱신
+#   파일 수정 시 캐시 갱신
 # =========================================
 @st.cache_data
 def load_data(file_versions):
@@ -241,29 +258,66 @@ if jeong_df is not None:
 
 # =========================================
 #   수시 데이터 전처리
+#   - 9등급/5등급 컬럼 동시 지원
 # =========================================
 SUJI_HAS_DATA = suji_df is not None and not suji_df.empty
 
 if SUJI_HAS_DATA:
-    grade_cols = [
-        c for c in suji_df.columns
-        if "등급" in c and not any(x in c for x in ["한국사", "탐구", "제2외"])
+    # 9등급 대표 컬럼 찾기
+    col_9 = None
+    candidates_9 = [
+        ["9등급", "일반등급"],
+        ["9등급", "등급"],
+        ["일반등급"],
+        ["전교과평균등급"],
+        ["평균등급"],
+        ["등급"],
     ]
-
-    main_grade_col = None
-    for k in ["일반등급", "내등급(환산)", "전교과평균등급", "전교과"]:
-        kk = k.replace(" ", "")
-        if kk in suji_df.columns:
-            main_grade_col = kk
+    for keys in candidates_9:
+        col_9 = find_col_contains(
+            suji_df,
+            keys,
+            exclude_keywords=["5등급", "한국사", "탐구", "제2외", "최저", "기준"]
+        )
+        if col_9:
             break
 
-    if main_grade_col is None and grade_cols:
-        main_grade_col = grade_cols[0]
+    # 5등급 대표 컬럼 찾기
+    col_5 = None
+    candidates_5 = [
+        ["5등급", "일반등급"],
+        ["5등급", "등급"],
+        ["내등급(환산)"],
+        ["내등급", "환산"],
+    ]
+    for keys in candidates_5:
+        col_5 = find_col_contains(
+            suji_df,
+            keys,
+            exclude_keywords=["9등급", "한국사", "탐구", "제2외", "최저", "기준"]
+        )
+        if col_5:
+            break
 
-    if main_grade_col:
-        suji_df["대표등급"] = pd.to_numeric(suji_df[main_grade_col], errors="coerce")
+    # 숫자형 변환
+    if col_9:
+        suji_df["대표등급_9"] = pd.to_numeric(suji_df[col_9], errors="coerce")
     else:
-        suji_df["대표등급"] = np.nan
+        suji_df["대표등급_9"] = np.nan
+
+    if col_5:
+        suji_df["대표등급_5"] = pd.to_numeric(suji_df[col_5], errors="coerce")
+    else:
+        suji_df["대표등급_5"] = np.nan
+
+    # 통합 대표등급
+    # 2026 이상은 5등급 우선
+    # 2025 이하는 9등급 우선
+    suji_df["대표등급"] = np.where(
+        suji_df["입시연도"] >= 2026,
+        suji_df["대표등급_5"].fillna(suji_df["대표등급_9"]),
+        suji_df["대표등급_9"].fillna(suji_df["대표등급_5"])
+    )
 
     suji_df["합격"] = suji_df.apply(decide_admit, axis=1)
 
@@ -278,7 +332,7 @@ def get_student_inputs():
     with col1:
         my_grade = st.number_input(
             "내신 대표 등급 (전교과·국수영 평균 등급)",
-            min_value=1.0, max_value=9.0, step=1.0, value=3.0
+            min_value=1.0, max_value=9.0, step=0.1, value=3.0
         )
     with col2:
         mock_percent_input = st.number_input(
@@ -393,7 +447,7 @@ def render_jagajin_inside_tab():
 
 
 # =========================================
-#   뷰 1 : 함창고 등급대 분석
+#   뷰 1 : 함창고 등급대 분석 (통합)
 # =========================================
 def view_grade_analysis():
     st.header("함창고 등급대 분석")
@@ -417,12 +471,16 @@ def view_grade_analysis():
         grade_min, grade_max = st.slider(
             "대표등급 범위",
             min_value=min_g, max_value=max_g,
-            value=(min_g, max_g), step=1.0
+            value=(min_g, max_g), step=0.1
         )
 
     with col2:
         year_opts = sorted(df["입시연도"].dropna().unique().tolist())
-        selected_years = st.multiselect("입시 연도", year_opts, default=[year_opts[-1]] if year_opts else [])
+        selected_years = st.multiselect(
+            "입시 연도",
+            year_opts,
+            default=[year_opts[-1]] if year_opts else []
+        )
 
     with col3:
         region_col = "지역" if "지역" in df.columns else None
@@ -466,6 +524,7 @@ def view_grade_analysis():
 
     st.markdown("### 세부유형 필터")
     keyword_input = st.text_input("세부유형 검색 (예: 농어촌 기회)", "")
+
     if "세부유형" not in base.columns:
         base["세부유형"] = ""
 
@@ -485,6 +544,7 @@ def view_grade_analysis():
     admit_only = base[base["합격"]]
 
     st.subheader("검색 조건 기준 전형별 합격률")
+
     base["지원전형"] = base[vt_col].astype(str)
 
     rate_df = (
@@ -512,6 +572,7 @@ def view_grade_analysis():
     st.altair_chart(chart_rate, use_container_width=True)
 
     st.subheader("합격자 지역 분포")
+
     if admit_only.empty or "지역" not in admit_only.columns:
         st.info("합격 데이터 없음")
     else:
@@ -580,6 +641,7 @@ def view_grade_analysis():
                     .reset_index(name="최저충족률")
                 )
                 min_stats["최저충족률_pct"] = (min_stats["최저충족률"] * 100).round(1)
+
                 st.dataframe(
                     min_stats[["전형분류", "최저충족률_pct"]].rename(columns={"최저충족률_pct": "최저충족률(%)"}),
                     use_container_width=True,
@@ -625,20 +687,147 @@ def view_grade_analysis():
         detail["최저"] = "없음"
 
     table_cols = [
-        "입시연도", "이름마스킹", "대표등급", "지역",
+        "입시연도", "이름마스킹", "대표등급", "대표등급_9", "대표등급_5", "지역",
         "대학명", "모집단위", "지원전형", "세부유형", "최저"
     ]
     table_cols = [c for c in table_cols if c in detail.columns]
 
-    table_df = detail[table_cols].sort_values(
-        [c for c in ["입시연도", "대표등급", "대학명", "모집단위"] if c in table_cols]
-    )
+    sort_cols = [c for c in ["입시연도", "대표등급", "대학명", "모집단위"] if c in table_cols]
+    table_df = detail[table_cols].sort_values(sort_cols)
 
     st.dataframe(table_df, use_container_width=True, hide_index=True)
 
 
 # =========================================
-#   뷰 2 : 수시·정시 추천 탐색기
+#   뷰 2 : 2026+ 5등급제 분석
+# =========================================
+def view_grade_analysis_5():
+    st.header("2026+ 5등급제 분석")
+
+    if not SUJI_HAS_DATA:
+        st.error("함창고 수시진학관리 데이터가 없어 분석을 진행할 수 없습니다.")
+        return
+
+    if "대표등급_5" not in suji_df.columns:
+        st.error("5등급 컬럼을 찾지 못했습니다.")
+        return
+
+    df = suji_df.copy()
+    df = df[df["입시연도"] >= 2026]
+    df = df.dropna(subset=["대표등급_5"])
+
+    if df.empty:
+        st.info("2026 이후 5등급제 데이터가 없습니다.")
+        return
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        grade_min, grade_max = st.slider(
+            "5등급 범위",
+            min_value=1.0, max_value=5.0,
+            value=(1.0, 5.0), step=0.1
+        )
+
+    with col2:
+        year_opts = sorted(df["입시연도"].dropna().unique().tolist())
+        selected_years = st.multiselect("입시 연도", year_opts, default=year_opts)
+
+    with col3:
+        region = st.multiselect(
+            "지역 선택",
+            options=sorted(df["지역"].dropna().unique()) if "지역" in df.columns else []
+        )
+
+    with col4:
+        univ = st.multiselect(
+            "대학 선택",
+            options=sorted(df["대학명"].dropna().unique()) if "대학명" in df.columns else []
+        )
+
+    major_keyword = st.text_input("학과 키워드", "", key="major_keyword_5")
+    detail_keyword = st.text_input("세부유형 검색", "", key="detail_keyword_5")
+
+    filtered = df[(df["대표등급_5"] >= grade_min) & (df["대표등급_5"] <= grade_max)]
+
+    if selected_years:
+        filtered = filtered[filtered["입시연도"].isin(selected_years)]
+    if region and "지역" in filtered.columns:
+        filtered = filtered[filtered["지역"].isin(region)]
+    if univ and "대학명" in filtered.columns:
+        filtered = filtered[filtered["대학명"].isin(univ)]
+    if major_keyword and "모집단위" in filtered.columns:
+        filtered = filtered[filtered["모집단위"].astype(str).str.contains(major_keyword, na=False)]
+
+    if "세부유형" not in filtered.columns:
+        filtered["세부유형"] = ""
+
+    if detail_keyword.strip():
+        keys = [k for k in re.split(r"[ ,]+", detail_keyword) if k.strip()]
+
+        def match_kw(x):
+            x = str(x)
+            return all(k in x for k in keys)
+
+        filtered = filtered[filtered["세부유형"].apply(match_kw)]
+
+    if filtered.empty:
+        st.info("조건에 맞는 데이터가 없습니다.")
+        return
+
+    vt_col = "전형유형" if "전형유형" in filtered.columns else "전형명(대)" if "전형명(대)" in filtered.columns else None
+    if vt_col is None:
+        st.error("전형 관련 컬럼을 찾을 수 없습니다.")
+        return
+
+    st.subheader("5등급 기준 상세 목록")
+
+    detail = filtered.copy()
+    if "이름" in detail.columns:
+        detail["이름마스킹"] = detail["이름"].astype(str).str[0] + "OO"
+    else:
+        detail["이름마스킹"] = "OO"
+
+    detail["지원전형"] = detail[vt_col].astype(str)
+
+    show_cols = [
+        "입시연도", "이름마스킹", "대표등급_5", "대표등급_9", "지역",
+        "대학명", "모집단위", "지원전형", "세부유형", "최종단계", "합격"
+    ]
+    show_cols = [c for c in show_cols if c in detail.columns]
+
+    sort_cols = [c for c in ["입시연도", "대표등급_5", "대학명", "모집단위"] if c in show_cols]
+
+    st.dataframe(
+        detail[show_cols].sort_values(sort_cols),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.subheader("5등급 기준 전형별 합격률")
+
+    stat = (
+        filtered.groupby(vt_col, as_index=False)
+        .agg(전체지원=("합격", "size"), 합격=("합격", "sum"))
+    )
+    stat["합격률(%)"] = (stat["합격"] / stat["전체지원"] * 100).round(1)
+
+    st.dataframe(stat, use_container_width=True, hide_index=True)
+
+    chart = (
+        alt.Chart(stat)
+        .mark_bar()
+        .encode(
+            x=alt.X(f"{vt_col}:N", sort="-y", title="지원전형"),
+            y=alt.Y("합격률(%):Q"),
+            tooltip=[vt_col, "전체지원", "합격", "합격률(%)"]
+        )
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+# =========================================
+#   뷰 3 : 수시·정시 추천 탐색기
 # =========================================
 def view_recommend():
     st.header("수시·정시 추천 탐색기")
@@ -712,6 +901,7 @@ def view_recommend():
                 cols.append(detail_col)
             cols += ["합격평균내신", "내신차이(합-입)"]
             cols = [c for c in cols if c in rec.columns]
+
             st.dataframe(rec[cols], hide_index=True, use_container_width=True)
 
     with tab_je:
@@ -766,7 +956,7 @@ def view_recommend():
 
 
 # =========================================
-#   뷰 3 : 최저 기준으로 대학 찾기
+#   뷰 4 : 최저 기준으로 대학 찾기
 # =========================================
 def view_choejeo():
     st.header("최저 기준으로 대학 찾기")
@@ -846,7 +1036,7 @@ with st.sidebar:
     st.markdown("### 메뉴 선택")
     menu = st.radio(
         "",
-        ["함창고 등급대 분석", "수시·정시 추천 탐색기", "최저 기준으로 대학 찾기"]
+        ["함창고 등급대 분석", "2026+ 5등급제 분석", "수시·정시 추천 탐색기", "최저 기준으로 대학 찾기"]
     )
 
     st.markdown("---")
@@ -871,6 +1061,21 @@ with st.sidebar:
         else:
             st.write("통합 수시 데이터 없음")
 
+        if suji_df is not None and "대표등급_9" in suji_df.columns:
+            st.write(
+                "대표등급_9 결측 제외 연도:",
+                sorted(suji_df.dropna(subset=["대표등급_9"])["입시연도"].unique().tolist())
+            )
+
+        if suji_df is not None and "대표등급_5" in suji_df.columns:
+            st.write(
+                "대표등급_5 결측 제외 연도:",
+                sorted(suji_df.dropna(subset=["대표등급_5"])["입시연도"].unique().tolist())
+            )
+
+        st.write("9등급 컬럼 후보 선택:", col_9 if SUJI_HAS_DATA else None)
+        st.write("5등급 컬럼 후보 선택:", col_5 if SUJI_HAS_DATA else None)
+
     st.markdown("---")
     st.markdown(
         "<div style='font-size:0.85rem; color:gray;'>제작자 함창고 교사 박호종</div>",
@@ -883,6 +1088,8 @@ with st.sidebar:
 # =========================================
 if menu == "함창고 등급대 분석":
     view_grade_analysis()
+elif menu == "2026+ 5등급제 분석":
+    view_grade_analysis_5()
 elif menu == "수시·정시 추천 탐색기":
     view_recommend()
 elif menu == "최저 기준으로 대학 찾기":
