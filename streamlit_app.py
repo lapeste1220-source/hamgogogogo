@@ -186,24 +186,41 @@ def pick_best_grade_col(df: pd.DataFrame, candidates, low, high, min_valid=30):
 #   - 이 함수는 st.error를 내부에서 띄우지 않음(상단 배너 방지)
 # =========================================
 def _choejeo_postprocess_from_raw(raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    - 상단 빈줄/설명줄 존재 가능
+    - '대학명'이 있는 행을 헤더로 탐지
+    - NaN/float 섞여도 안전하게 처리
+    """
+    def s(x):
+        # NaN/None도 안전하게 문자열화
+        if pd.isna(x):
+            return ""
+        return str(x).strip()
+
     header_idx = None
-    for i in range(min(120, len(raw))):
-        row_vals = raw.iloc[i].astype(str).tolist()
-        if any(v.strip() == "대학명" for v in row_vals):
+    for i in range(min(200, len(raw))):
+        row_vals = [s(v) for v in raw.iloc[i].tolist()]
+        if any(v == "대학명" for v in row_vals):
             header_idx = i
             break
 
     if header_idx is None:
-        df = raw.copy()
-        df.columns = df.iloc[0].tolist()
-        df = df.iloc[1:].copy()
+        # fallback: 첫 행을 헤더로
+        header = [s(v) for v in raw.iloc[0].tolist()]
+        df = raw.iloc[1:].copy()
+        df.columns = header
     else:
-        header = raw.iloc[header_idx].tolist()
+        header = [s(v) for v in raw.iloc[header_idx].tolist()]
         df = raw.iloc[header_idx + 1:].copy()
         df.columns = header
 
-    df = df.loc[:, [c for c in df.columns if pd.notna(c) and str(c).strip() != ""]]
+    # 빈 컬럼명 제거
+    keep_cols = [c for c in df.columns if s(c) != ""]
+    df = df.loc[:, keep_cols]
+
+    # 컬럼명 정리
     df = normalize_columns(df)
+
     return df
 
 
