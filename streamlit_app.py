@@ -803,7 +803,18 @@ def view_choejeo():
         st.error(f"최저 기준 데이터 로딩 실패: {err}")
         return
 
+    # ✅ 지역 컬럼 자동 탐지
     region_col = "지역구분" if "지역구분" in df.columns else ("지역" if "지역" in df.columns else None)
+
+    # ✅ 전형명/전형방법 컬럼 자동 탐지
+    def pick_col(df_, candidates):
+        for c in candidates:
+            if c in df_.columns:
+                return c
+        return None
+
+    col_jeonhyeong = pick_col(df, ["전형명", "전형유형", "전형", "전형명(대)", "전형세부유형", "선발유형"])
+    col_method     = pick_col(df, ["전형방법", "전형방법(상세)", "전형방법_상세", "전형방식", "전형방법내용", "전형방법(요약)", "전형방법_내용"])
 
     st.markdown("### 1) 내 최저 등급 입력")
     c1, c2, c3 = st.columns(3)
@@ -828,16 +839,6 @@ def view_choejeo():
     reg = st.multiselect("지역 선택", options=sorted(df[region_col].dropna().unique()) if region_col else [])
     keyword = st.text_input("검색 키워드 (대학명/학과/기준 내용)", "")
 
-    def pick_col(df, candidates):
-    for c in candidates:
-        if c in df.columns:
-            return c
-    return None
-
-    # 전형명/전형방법 후보들(파일마다 이름이 달라서 여러 후보를 둠)
-    col_jeonhyeong = pick_col(df, ["전형명", "전형유형", "전형", "전형명(대)", "전형세부유형", "선발유형"])
-    col_method     = pick_col(df, ["전형방법", "전형방법(상세)", "전형방법_상세", "전형방식", "전형방법내용", "전형방법(요약)"]) 
-    
     if st.button("검색", type="primary"):
         dff = df.copy()
 
@@ -869,6 +870,7 @@ def view_choejeo():
             st.info("입력 조건을 충족하는 대학이 없습니다.")
             return
 
+        # ✅ 출력 컬럼 구성 (전형명/전형방법 자동 포함)
         base_cols = [c for c in ["지역구분", "지역", "대학명", "모집단위명"] if c in ok.columns]
 
         extra_cols = []
@@ -877,7 +879,7 @@ def view_choejeo():
         if col_method and col_method in ok.columns:
             extra_cols.append(col_method)
 
-        # 혹시 전형세부유형이 있으면 같이
+        # 전형세부유형이 따로 있으면 추가(중복 방지)
         if "전형세부유형" in ok.columns and "전형세부유형" not in extra_cols:
             extra_cols.append("전형세부유형")
 
