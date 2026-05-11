@@ -1,9 +1,11 @@
 # =========================================
-#   함창고 수시·정시 검색기 (최종 수정 완성본)
+#   함창고 수시·정시 검색기 (최저 업로드 파일 2027 대응 / 전체 복붙용 완성본)
 #   - 2024~2026 통합 조회
 #   - 2026 CSV 2줄 헤더 대응
 #   - 등급대 분석 메뉴 유지
 #   - 상세표에 2026만 5등급변환내신 표시
+#   - ✅ 2027최저모음.csv 업로드 파일(상단 빈줄/헤더 위치 변동) 자동 헤더 탐지 로딩
+#   - ✅ 최저 조회: 지역 컬럼명(지역구분/지역) 자동 대응
 # =========================================
 
 import streamlit as st
@@ -32,7 +34,9 @@ SUJI_2024_FILE = DATA_DIR / "수시진학관리(2024년2월20일).csv"
 
 SUSI_FILE = DATA_DIR / "2025수시입결.csv"
 JEONG_FILE = DATA_DIR / "2025정시입결.csv"
-CHOEJEO_FILE = DATA_DIR / "2025최저모음.csv"
+
+# ✅ 업로드 파일명으로 변경
+CHOEJEO_FILE = DATA_DIR / "2027최저모음.csv"
 
 LOGO_FILE = DATA_DIR / "hch_logo.png"
 
@@ -116,6 +120,12 @@ def decide_admit(row) -> bool:
 
 
 def parse_minimum_rule(rule_text, grades):
+    """
+    최저 문자열에서 아래 3가지 패턴을 판정
+    (1) '2등급이내'  -> 모든 과목이 2등급 이내
+    (2) '2개영역합5이내' -> 상위 n과목(=등급 낮은 순) 합이 limit 이하
+    (3) '각1등급' -> 모든 과목이 1등급 이내
+    """
     if not rule_text or not isinstance(rule_text, str):
         return False
 
@@ -184,6 +194,7 @@ def count_valid_range(series, low, high):
     vals = pd.to_numeric(series, errors="coerce")
     return ((vals >= low) & (vals <= high)).sum()
 
+
 def pick_best_grade_col(df: pd.DataFrame, candidates, low, high, min_valid=30):
     best_col = None
     best_count = -1
@@ -199,6 +210,55 @@ def pick_best_grade_col(df: pd.DataFrame, candidates, low, high, min_valid=30):
     if best_count >= min_valid:
         return best_col
     return None
+
+
+# =========================================
+# ✅ 2027최저모음.csv 전용 로더 (헤더 자동 탐지)
+#   - 상단 빈줄/설명줄이 있어도 '대학명' 있는 행을 헤더로 잡음
+# =========================================
+def read_choejeo_2027_csv(path: Path):
+    if not path.exists():
+        return None
+
+    encodings = ["utf-8", "utf-8-sig", "cp949", "euc-kr"]
+    last_error = None
+
+    for enc in encodings:
+        try:
+            raw = pd.read_csv(path, encoding=enc, header=None)
+
+            header_idx = None
+            for i in range(min(50, len(raw))):
+                row_vals = raw.iloc[i].astype(str).tolist()
+                # 정확히 '대학명'이 들어있는 행을 헤더로 사용
+                if any(v.strip() == "대학명" for v in row_vals):
+                    header_idx = i
+                    break
+
+            if header_idx is None:
+                # fallback: 일반 로딩
+                df = pd.read_csv(path, encoding=enc)
+                df = normalize_columns(df)
+                return df
+
+            header = raw.iloc[header_idx].tolist()
+            df = raw.iloc[header_idx + 1:].copy()
+            df.columns = header
+
+            # 빈 컬럼 제거
+            df = df.loc[:, [c for c in df.columns if pd.notna(c) and str(c).strip() != ""]]
+
+            # 컬럼명 정리
+            df = normalize_columns(df)
+
+            return df
+
+        except Exception as e:
+            last_error = e
+
+    st.error(f"최저 CSV 읽기 실패: {path.name} / 오류: {last_error}")
+    return None
+
 
 # =========================================
 #   데이터 로드
@@ -232,7 +292,9 @@ def load_data(file_versions):
 
     susi = safe_read_csv(SUSI_FILE) if SUSI_FILE.exists() else None
     jeong = safe_read_csv(JEONG_FILE) if JEONG_FILE.exists() else None
-    choe = safe_read_csv(CHOEJEO_FILE) if CHOEJEO_FILE.exists() else None
+
+    # ✅ 최저는 2027 전용 로더 사용
+    choe = read_choejeo_2027_csv(CHOEJEO_FILE) if CHOEJEO_FILE.exists() else None
 
     susi = normalize_columns(susi) if susi is not None else None
     jeong = normalize_columns(jeong) if jeong is not None else None
@@ -307,9 +369,6 @@ if SUJI_HAS_DATA:
     df_old = suji_df[suji_df["입시연도"] < 2026].copy()
     df_new = suji_df[suji_df["입시연도"] >= 2026].copy()
 
-    # -----------------------------
-    # 2024~2025 구양식 9등급 후보
-    # -----------------------------
     old_9_candidates = [
         "일반등급",
         "전교과평균등급",
@@ -317,13 +376,11 @@ if SUJI_HAS_DATA:
         "내등급(환산)",
     ]
 
-    # 이름으로 먼저 찾고
     for c in old_9_candidates:
         if c in suji_df.columns:
             col_9_old = c
             break
 
-    # 그래도 없으면 1~9 범위 많은 컬럼 자동 선택
     if col_9_old is None and not df_old.empty:
         old_numeric_candidates = [
             c for c in suji_df.columns
@@ -338,9 +395,6 @@ if SUJI_HAS_DATA:
         ]
         col_9_old = pick_best_grade_col(df_old, old_numeric_candidates, 1, 9, min_valid=10)
 
-    # -----------------------------
-    # 2026 신양식 9등급 후보
-    # -----------------------------
     new_9_candidates = [
         c for c in suji_df.columns
         if ("등급" in str(c))
@@ -355,17 +409,11 @@ if SUJI_HAS_DATA:
     if not df_new.empty:
         col_9_new = pick_best_grade_col(df_new, new_9_candidates, 1, 9, min_valid=30)
 
-    # -----------------------------
-    # 2026 신양식 5등급 후보
-    # -----------------------------
     new_5_candidates = [
         c for c in suji_df.columns
         if ("등급" in str(c))
         and ("점수" not in str(c))
-        and (
-            ("5등급" in str(c))
-            or ("환산" in str(c))
-        )
+        and (("5등급" in str(c)) or ("환산" in str(c)))
         and ("한국사" not in str(c))
         and ("탐구" not in str(c))
         and ("제2외" not in str(c))
@@ -381,21 +429,17 @@ if SUJI_HAS_DATA:
 
     if col_9_old:
         suji_df["대표등급_9_old"] = pd.to_numeric(suji_df[col_9_old], errors="coerce")
-
     if col_9_new:
         suji_df["대표등급_9_new"] = pd.to_numeric(suji_df[col_9_new], errors="coerce")
-
     if col_5_new:
         suji_df["대표등급_5_new"] = pd.to_numeric(suji_df[col_5_new], errors="coerce")
 
-    # 연도별로 대표등급 분리 적용
     suji_df["대표등급"] = np.where(
         suji_df["입시연도"] >= 2026,
         suji_df["대표등급_9_new"],
         suji_df["대표등급_9_old"]
     )
 
-    # 2026만 5등급 변환 내신 표시
     suji_df["5등급변환내신"] = np.where(
         suji_df["입시연도"] >= 2026,
         suji_df["대표등급_5_new"],
@@ -920,9 +964,12 @@ def view_recommend():
 def view_choejeo():
     st.header("최저 기준으로 대학 찾기")
 
-    if choe_df is None:
-        st.error("최저 기준 데이터 파일을 찾을 수 없습니다.")
+    if choe_df is None or choe_df.empty:
+        st.error("최저 기준 데이터 파일을 찾을 수 없습니다. (2027최저모음.csv)")
         return
+
+    # ✅ 지역 컬럼 자동 탐지 (지역구분/지역)
+    region_col = "지역구분" if "지역구분" in choe_df.columns else ("지역" if "지역" in choe_df.columns else None)
 
     st.markdown("### 1) 내 최저 등급 입력")
 
@@ -945,17 +992,19 @@ def view_choejeo():
     my_grades = {"국어": g_k, "영어": g_e, "수학": g_m, "탐1": g_t1, "탐2": g_t2, "한국사": g_h}
 
     st.markdown("### 2) 지역 및 키워드 선택")
+
     reg = st.multiselect(
         "지역 선택",
-        options=sorted(choe_df["지역구분"].dropna().unique()) if "지역구분" in choe_df.columns else []
+        options=sorted(choe_df[region_col].dropna().unique()) if region_col else []
     )
+
     keyword = st.text_input("검색 키워드 (대학명/학과/기준 내용)", "")
 
     if st.button("검색", type="primary"):
         df = choe_df.copy()
 
-        if reg and "지역구분" in df.columns:
-            df = df[df["지역구분"].isin(reg)]
+        if reg and region_col:
+            df = df[df[region_col].isin(reg)]
 
         if keyword:
             key = keyword.replace(" ", "")
@@ -971,7 +1020,8 @@ def view_choejeo():
             return
 
         if "최저학력기준내용" not in df.columns:
-            st.error("최저학력기준내용 컬럼이 없습니다.")
+            st.error("최저학력기준내용 컬럼이 없습니다. (헤더 로딩 실패 가능)")
+            st.write("현재 컬럼:", df.columns.tolist())
             return
 
         df["최저충족가능"] = df["최저학력기준내용"].apply(
@@ -983,9 +1033,8 @@ def view_choejeo():
             st.info("입력 조건을 충족하는 대학이 없습니다.")
             return
 
-        cols = ["지역구분", "대학명", "전형세부유형", "모집단위명", "최저학력기준내용"]
-        show_cols = [c for c in cols if c in df_ok.columns]
-        st.dataframe(df_ok[show_cols], hide_index=True, use_container_width=True)
+        cols = [c for c in ["지역구분", "지역", "대학명", "전형세부유형", "모집단위명", "최저학력기준내용"] if c in df_ok.columns]
+        st.dataframe(df_ok[cols], hide_index=True, use_container_width=True)
 
 
 # =========================================
@@ -1007,6 +1056,7 @@ with st.sidebar:
         st.write("2026 파일 존재:", SUJI_2026_FILE.exists())
         st.write("2025 파일 존재:", SUJI_2025_FILE.exists())
         st.write("2024 파일 존재:", SUJI_2024_FILE.exists())
+        st.write("최저 파일 존재(2027):", CHOEJEO_FILE.exists())
 
         if SUJI_2026_FILE.exists():
             test26 = read_suji_2026_csv(SUJI_2026_FILE)
@@ -1027,6 +1077,9 @@ with st.sidebar:
         st.write("구양식 9등급 컬럼:", col_9_old)
         st.write("신양식 9등급 컬럼:", col_9_new)
         st.write("신양식 5등급 컬럼:", col_5_new)
+
+        if choe_df is not None:
+            st.write("최저 컬럼:", choe_df.columns.tolist()[:30])
 
     st.markdown("---")
     st.markdown(
