@@ -828,6 +828,16 @@ def view_choejeo():
     reg = st.multiselect("지역 선택", options=sorted(df[region_col].dropna().unique()) if region_col else [])
     keyword = st.text_input("검색 키워드 (대학명/학과/기준 내용)", "")
 
+    def pick_col(df, candidates):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+    # 전형명/전형방법 후보들(파일마다 이름이 달라서 여러 후보를 둠)
+    col_jeonhyeong = pick_col(df, ["전형명", "전형유형", "전형", "전형명(대)", "전형세부유형", "선발유형"])
+    col_method     = pick_col(df, ["전형방법", "전형방법(상세)", "전형방법_상세", "전형방식", "전형방법내용", "전형방법(요약)"]) 
+    
     if st.button("검색", type="primary"):
         dff = df.copy()
 
@@ -859,8 +869,22 @@ def view_choejeo():
             st.info("입력 조건을 충족하는 대학이 없습니다.")
             return
 
-        cols = [c for c in ["지역구분", "지역", "대학명", "전형세부유형", "모집단위명", "최저학력기준내용"] if c in ok.columns]
-        st.dataframe(ok[cols], hide_index=True, use_container_width=True)
+        base_cols = [c for c in ["지역구분", "지역", "대학명", "모집단위명"] if c in ok.columns]
+
+        extra_cols = []
+        if col_jeonhyeong and col_jeonhyeong in ok.columns:
+            extra_cols.append(col_jeonhyeong)
+        if col_method and col_method in ok.columns:
+            extra_cols.append(col_method)
+
+        # 혹시 전형세부유형이 있으면 같이
+        if "전형세부유형" in ok.columns and "전형세부유형" not in extra_cols:
+            extra_cols.append("전형세부유형")
+
+        tail_cols = [c for c in ["최저학력기준내용"] if c in ok.columns]
+
+        show_cols = base_cols + extra_cols + tail_cols
+        st.dataframe(ok[show_cols], hide_index=True, use_container_width=True)
 
 # =========================================
 #   사이드바 메뉴
